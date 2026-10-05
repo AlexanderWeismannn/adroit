@@ -38,6 +38,19 @@ type Profile struct {
 	Keys []string `json:"keys,omitempty"`
 }
 
+// ProgramFor is the program a new session in repoPath runs: the repository's
+// own agent profile when it names one that exists, else the global default.
+func (c *Config) ProgramFor(repoPath string) string {
+	if e := c.repoEntry(repoPath); e != nil && e.Agent != "" {
+		for _, p := range c.Profiles {
+			if p.Name == e.Agent {
+				return rehomeProgram(p.Program)
+			}
+		}
+	}
+	return c.GetProgram()
+}
+
 // AgentPreset is a known agent CLI: what to run, which keys it reads, how to
 // install it, and a one-shot command that proves a key works.
 type AgentPreset struct {
@@ -179,6 +192,9 @@ type RepoConfig struct {
 	PreserveBranchCase *bool `json:"preserve_branch_case,omitempty"`
 	// Dev is the development stack that runs this repository.
 	Dev *DevConfig `json:"dev,omitempty"`
+	// Agent names the profile new sessions in this repository start with,
+	// instead of the global default.
+	Agent string `json:"agent,omitempty"`
 }
 
 // DevConfig describes a long-running development stack -- servers, watchers, a

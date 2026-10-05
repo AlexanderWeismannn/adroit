@@ -60,6 +60,8 @@ const (
 	stateTheme
 	// stateRestore is the state when the killed-session picker is open.
 	stateRestore
+	// stateSettings is the state when the settings screen is open.
+	stateSettings
 )
 
 type home struct {
@@ -165,6 +167,12 @@ type home struct {
 	// restorePicker is open only in stateRestore: the list of sessions that have
 	// been killed and whose conversation can be picked back up.
 	restorePicker *overlay.RestorePicker
+
+	// settings is open only in stateSettings.
+	settings *overlay.Settings
+	// programOverridden is true when -p chose the program, which then wins over
+	// a repository's own agent.
+	programOverridden bool
 }
 
 // reapOrphanedTerminals kills the Terminal-tab shells of sessions that are gone.
@@ -322,14 +330,15 @@ func newHome(ctx context.Context, program string, autoYes bool) *home {
 		menu:    ui.NewMenu(),
 		tabbedWindow: ui.NewTabbedWindow(
 			ui.NewPreviewPane(), ui.NewDiffPane(), ui.NewTerminalPane(), ui.NewRunPane(devStack)),
-		errBox:    ui.NewErrBox(),
-		storage:   storage,
-		appConfig: appConfig,
-		program:   program,
-		autoYes:   autoYes,
-		state:     stateDefault,
-		appState:  appState,
-		devStack:  devStack,
+		errBox:            ui.NewErrBox(),
+		storage:           storage,
+		appConfig:         appConfig,
+		program:           program,
+		programOverridden: program != appConfig.GetProgram(),
+		autoYes:           autoYes,
+		state:             stateDefault,
+		appState:          appState,
+		devStack:          devStack,
 	}
 	h.list = ui.NewList(&h.spinner, autoYes)
 	// New sessions are always created in the working directory, so the naming
@@ -701,6 +710,11 @@ func (m *home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.handleError(err)
 		}
 		return m, tea.Batch(tea.WindowSize(), m.instanceChanged(), notice)
+	case overlay.SettingsCheckMsg:
+		if m.settings != nil {
+			m.settings.HandleCheck(msg)
+		}
+		return m, nil
 	case instancePausedMsg:
 		delete(m.busy, msg.instance)
 		if msg.err != nil {
@@ -780,7 +794,7 @@ func (m *home) handleMenuHighlighting(msg tea.KeyMsg) (cmd tea.Cmd, returnEarly 
 	// underneath one, and re-sending the key to do it, is both invisible and a
 	// second delivery of a keypress the overlay already handled.
 	if m.state == statePrompt || m.state == stateHelp || m.state == stateConfirm ||
-		m.state == stateTheme || m.state == stateRestore {
+		m.state == stateTheme || m.state == stateRestore || m.state == stateSettings {
 		return nil, false
 	}
 	// While a name is being typed the row owns every printable key. Most letters
@@ -831,6 +845,10 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 
 	if m.state == stateTheme {
 		return m.handleThemeState(msg)
+	}
+
+	if m.state == stateSettings {
+		return m.handleSettingsState(msg)
 	}
 
 	if m.state == stateRestore {
@@ -1195,7 +1213,7 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 		instance, err := session.NewInstance(session.InstanceOptions{
 			Title:   "",
 			Path:    ".",
-			Program: m.program,
+			Program: m.newSessionProgram(),
 		})
 		if err != nil {
 			return m, m.handleError(err)
@@ -1216,7 +1234,7 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 		instance, err := session.NewInstance(session.InstanceOptions{
 			Title:   "",
 			Path:    ".",
-			Program: m.program,
+			Program: m.newSessionProgram(),
 		})
 		if err != nil {
 			return m, m.handleError(err)
@@ -1356,6 +1374,8 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 		return m, m.stopDevStack()
 	case keys.KeyRestore:
 		return m.openRestorePicker()
+	case keys.KeySettings:
+		return m.openSettings()
 	case keys.KeyTheme:
 		m.themeBeforePicker = theme.Current()
 		m.themePicker = overlay.NewThemePicker(m.appConfig.Theme)
@@ -2426,6 +2446,9 @@ func (m *home) View() string {
 			log.ErrorLog.Printf("text overlay is nil")
 		}
 		return m.fitToTerminal(overlay.PlaceOverlay(0, 0, m.textOverlay.Render(), mainView, true, true))
+	} else if m.state == stateSettings && m.settings != nil {
+		m.settings.SetWidth(m.termWidth)
+		return m.fitToTerminal(overlay.PlaceOverlay(0, 0, m.settings.Render(), mainView, true, true))
 	} else if m.state == stateTheme {
 		if m.themePicker == nil {
 			log.ErrorLog.Printf("theme picker is nil")

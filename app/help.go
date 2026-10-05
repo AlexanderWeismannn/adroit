@@ -83,6 +83,7 @@ func (h helpTypeGeneral) toContent() string {
 		lipgloss.JoinVertical(lipgloss.Left, ui.BadgeLegend()...),
 		"",
 		headerStyle.Render("Other:"),
+		keyStyle.Render("s")+descStyle.Render("         - Settings: agents and their API keys, workspaces, options"),
 		keyStyle.Render("t")+descStyle.Render("         - Change the colour theme (previews as you move)"),
 		keyStyle.Render("tab")+descStyle.Render("       - Switch between preview, diff, terminal and run tabs"),
 		keyStyle.Render("shift-↓/↑")+descStyle.Render(" - Scroll in preview/diff/terminal/run view"),
