@@ -48,8 +48,8 @@ EOF
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        --version) VERSION="${2#v}"; shift 2 ;;
-        --bin-dir) BIN_DIR="$2"; shift 2 ;;
+        --version) [ $# -ge 2 ] || die "--version needs a value, e.g. --version 1.1.0"; VERSION="${2#v}"; shift 2 ;;
+        --bin-dir) [ $# -ge 2 ] || die "--bin-dir needs a directory"; BIN_DIR="$2"; shift 2 ;;
         --with-cs) WITH_CS=1; shift ;;
         --install-deps) INSTALL_DEPS=1; shift ;;
         --no-path) EDIT_PATH=0; shift ;;
@@ -57,6 +57,13 @@ while [ $# -gt 0 ]; do
         *) die "unknown option: $1 (try --help)" ;;
     esac
 done
+
+# Absolute from here on: a relative --bin-dir would otherwise leave a dangling cs
+# link and write a relative directory into the shell profile's PATH.
+case "$BIN_DIR" in
+    /*) ;;
+    *) BIN_DIR="$(pwd)/$BIN_DIR" ;;
+esac
 
 cleanup() { if [ -n "$TMP_DIR" ]; then rm -rf "$TMP_DIR"; fi; }
 trap cleanup EXIT
@@ -102,9 +109,21 @@ sha256() {
     fi
 }
 
+# latest_version reads the tag GitHub redirects /releases/latest to. Not the
+# REST API: unauthenticated, that allows 60 calls an hour per address, and an
+# office, a CI runner or a VPN exit shares one -- a refused call read as "no
+# release" and sent people to install Go for nothing.
 latest_version() {
-    fetch "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null \
-        | grep -m1 '"tag_name":' | sed -E 's/.*"v?([^"]+)".*/\1/'
+    local url
+    if need curl; then
+        url="$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/${REPO}/releases/latest" 2>/dev/null || true)"
+    else
+        url="$(wget -q --max-redirect=5 -S --spider "https://github.com/${REPO}/releases/latest" 2>&1 | sed -n 's/^ *[Ll]ocation: *//p' | tail -1)"
+    fi
+    case "$url" in
+        */releases/tag/v*) printf '%s\n' "${url##*/tag/v}" | tr -d '\r' ;;
+        *) return 1 ;;
+    esac
 }
 
 install_from_release() {
@@ -175,7 +194,11 @@ ensure_path() {
     local profile line
     case "${SHELL:-}" in
         */zsh) profile="$HOME/.zshrc"; line="export PATH=\"$BIN_DIR:\$PATH\"" ;;
-        */bash) profile="$HOME/.bashrc"; line="export PATH=\"$BIN_DIR:\$PATH\"" ;;
+        */bash)
+            # macOS Terminal and iTerm open login shells, which read .bash_profile
+            # and never .bashrc.
+            if [ "$OS" = darwin ]; then profile="$HOME/.bash_profile"; else profile="$HOME/.bashrc"; fi
+            line="export PATH=\"$BIN_DIR:\$PATH\"" ;;
         */fish) profile="$HOME/.config/fish/config.fish"; line="fish_add_path $BIN_DIR" ;;
         *) profile="$HOME/.profile"; line="export PATH=\"$BIN_DIR:\$PATH\"" ;;
     esac
@@ -198,7 +221,7 @@ main() {
         if [ -n "$VERSION" ]; then
             warn "could not download release v${VERSION} for ${OS}/${ARCH}"
         else
-            warn "no published release found for ${OS}/${ARCH}"
+            warn "could not find the latest release on github.com (offline, or blocked?); pass --version X.Y.Z to pick one"
         fi
         install_with_go || die "Go is not installed, so it cannot be built either. Install Go 1.23+ (https://go.dev/dl/) and re-run, or build from source (see the README)."
     fi

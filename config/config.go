@@ -423,7 +423,9 @@ func GetClaudeCommand() (string, error) {
 	if strings.Contains(shell, "zsh") {
 		shellCmd = "source ~/.zshrc &>/dev/null || true; which claude"
 	} else if strings.Contains(shell, "bash") {
-		shellCmd = "source ~/.bashrc &>/dev/null || true; which claude"
+		// .bash_profile too: on macOS a login shell reads that and never .bashrc,
+		// so an install that only .bash_profile puts on PATH was not found.
+		shellCmd = "source ~/.bash_profile &>/dev/null || true; source ~/.bashrc &>/dev/null || true; which claude"
 	} else {
 		shellCmd = "which claude"
 	}

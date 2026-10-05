@@ -7,6 +7,7 @@ on:
       - '**.go'
       - 'go.mod'
       - 'go.sum'
+      - 'install.sh'
       - '.github/workflows/build.yml'
   pull_request:
     branches: [ main ]
@@ -14,6 +15,7 @@ on:
       - '**.go'
       - 'go.mod'
       - 'go.sum'
+      - 'install.sh'
       - '.github/workflows/build.yml'
 
 jobs:
@@ -43,3 +45,30 @@ jobs:
 
       - name: Smoke-test the binary
         run: ./adroit version && ./adroit doctor || true
+
+  # The script people pipe into bash, run the way they run it: against the
+  # latest published release, into a fresh home. It has no other tests.
+  installer:
+    name: Installer (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install into a fresh home
+        run: |
+          export HOME="$RUNNER_TEMP/home" SHELL=/bin/bash
+          mkdir -p "$HOME"
+          bash install.sh --bin-dir rel-bin --with-cs
+          ./rel-bin/adroit version
+          test "$(readlink rel-bin/cs)" = "$PWD/rel-bin/adroit"
+          if [ "$RUNNER_OS" = "macOS" ]; then rc="$HOME/.bash_profile"; else rc="$HOME/.bashrc"; fi
+          grep -F "$PWD/rel-bin" "$rc"
+
+      - name: Refuse an option with no value
+        run: |
+          if bash install.sh --version 2>err.txt; then exit 1; fi
+          grep -q "needs a value" err.txt
