@@ -707,6 +707,14 @@ func (m *home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.handleError(msg.err)
 		}
 		m.tabbedWindow.CleanupTerminalForInstance(msg.instance.Title)
+		// Saved now, as start, resume and kill are. The pause has already
+		// removed the worktree, so a state file still saying Running would,
+		// after a crash, bring the row back as a running session in a directory
+		// that no longer exists -- and the next pause or resume deletes whatever
+		// the agent wrote there in the meantime.
+		if err := m.storage.SaveInstances(m.list.GetInstances()); err != nil {
+			return m, m.handleError(err)
+		}
 		return m, m.instanceChanged()
 	case instanceStartedMsg:
 		// Select the instance that just started (or failed)
