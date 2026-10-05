@@ -34,8 +34,10 @@ fixed script of keys. [agg](https://github.com/asciinema/agg) renders the result
 
 ```bash
 go build -o /tmp/adroit . && python3 demo/record.py /tmp/adroit /tmp/demo.cast
-agg --theme nord --font-size 15 --idle-time-limit 3 /tmp/demo.cast assets/demo.gif
-cp assets/demo.gif site/demo.gif
+agg --theme nord --font-size 17 --idle-time-limit 2 /tmp/demo.cast assets/demo.gif
+# the site plays an MP4 instead: sharper, and it can pause
+ffmpeg -i assets/demo.gif -movflags +faststart -pix_fmt yuv420p \
+  -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" -c:v libx264 -crf 22 site/demo.mp4
 ```
 
 Re-record it when the interface changes.

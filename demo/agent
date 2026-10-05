@@ -61,10 +61,10 @@ def write(path, body):
     return f
 
 REFRESH_NEW = '''func (c *Client) Do(req *Request) (*Response, error) {
-	// Refresh before sending: a token that expires mid-request fails once.
+	// Refresh first: an expiring token fails mid-request.
 	if c.token.ExpiresWithin(30 * time.Second) {
 		if err := c.refresh(req.Context()); err != nil {
-			return nil, fmt.Errorf("refresh token: %w", err)
+			return nil, fmt.Errorf("refresh: %w", err)
 		}
 	}
 	return c.send(req)

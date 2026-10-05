@@ -68,7 +68,7 @@ pre.cmd { margin: 0; font-size: 14px; white-space: pre-wrap; overflow-wrap: anyw
 .copy:hover { color: var(--text); border-color: var(--muted); }
 
 .demo { padding: 0; overflow: hidden; }
-.demo img { display: block; width: 100%; height: auto; }
+.demo video { display: block; width: 100%; height: auto; background: var(--bg); }
 .caption { margin: 10px 0 0; color: var(--muted); font-size: 13px; }
 
 /* The instance list, used for what Adroit does. */
@@ -150,7 +150,7 @@ footer { color: var(--muted); font-size: 13px; display: flex; justify-content: s
 
   <section aria-label="Demo">
     <div class="box demo">
-      <img src="demo.gif" width="1098" height="735" alt="Recording of Adroit: three sessions are created and their agents work at once, then a diff is reviewed, the theme picker previews themes, and a session is attached and detached.">
+      <video src="demo.mp4" poster="poster.png" width="1142" height="738" autoplay muted loop playsinline controls aria-label="Recording of Adroit: three agents work at once, then a diff is reviewed, the dev stack starts, the theme picker previews themes, and a session is attached and detached."></video>
     </div>
     <p class="caption">Recorded from the real app (<span class="fr">demo/record.py</span>), with a scripted stand-in agent so the run is repeatable.</p>
   </section>

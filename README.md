@@ -1,25 +1,44 @@
-# Adroit
+<div align="center">
+
+<img src="assets/brand/adroit-logo-readme.svg" alt="Adroit" width="150">
+
+**Run several coding agents at once, without them stepping on each other.**
 
 [![Release](https://img.shields.io/github/v/release/AlexanderWeismannn/adroit)](https://github.com/AlexanderWeismannn/adroit/releases)
 [![Build](https://github.com/AlexanderWeismannn/adroit/actions/workflows/build.yml/badge.svg)](https://github.com/AlexanderWeismannn/adroit/actions/workflows/build.yml)
 [![Website](https://img.shields.io/badge/site-adroit-88c0d0)](https://alexanderweismannn.github.io/adroit/)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE.md)
 
-Adroit is a terminal app that manages multiple coding agents — [Claude Code](https://github.com/anthropics/claude-code), [Codex](https://github.com/openai/codex), [Gemini](https://github.com/google-gemini/gemini-cli), [Aider](https://github.com/Aider-AI/aider) — each in its own isolated git workspace, so you can run several tasks at once and review them side by side.
+</div>
 
-It is a fork of [claude-squad](https://github.com/smtg-ai/claude-squad), which contributed the tmux-and-git-worktree foundation. The session model, the instance list, theming and most of the interface have since been reworked; see [Differences from claude-squad](#differences-from-claude-squad).
+Adroit is a terminal app for running [Claude Code](https://github.com/anthropics/claude-code),
+[Codex](https://github.com/openai/codex), [Gemini](https://github.com/google-gemini/gemini-cli) or
+[Aider](https://github.com/Aider-AI/aider) in parallel. Every task gets its own git branch, worktree and
+tmux session, and one screen shows all of them: what each agent is doing, what it changed, and whether
+its build passed.
 
-![Adroit running three agents at once, reviewing a diff, previewing themes, and attaching to a session](assets/demo.gif)
+![Three agents working at once in Adroit; then a diff, the dev stack starting, the theme picker, and attaching to a session](assets/demo.gif)
 
-<sub>Recorded from the real app with a scripted stand-in agent; see [`demo/`](demo/record.py).</sub>
+<sub>Recorded from the real app. The agent is a scripted stand-in so the recording is repeatable; see
+[`demo/record.py`](demo/record.py).</sub>
 
-### Highlights
+## How it works
 
-- Complete tasks in the background, including auto-accept mode
-- Manage every session from one terminal window
-- Review the diff before applying, check changes out before pushing
-- Each session gets its own git worktree and branch, so nothing collides
-- Each row carries its branch, CI verdict and pull-request state at a glance
+1. **Start a task.** `N` asks for a name and a first prompt. Adroit cuts a branch, adds a worktree under
+   `~/.adroit/worktrees`, and starts the agent in its own tmux session. Your main checkout is never touched.
+2. **Let it work, and start another.** A row spins while its agent is mid-turn and shows `✓ done` when the
+   turn ends, with the size of the change beside it. The agents do not share a checkout, so they cannot
+   overwrite each other.
+3. **Look in.** `tab` switches the right-hand pane between Preview, Diff, Terminal and Run. `↵` attaches you
+   to the agent itself; `ctrl-q` brings you back. Closing the terminal stops nothing: tmux keeps every
+   session alive until you return.
+4. **Hand it off.** `p` commits and pushes the branch, `c` commits and pauses the session so you can
+   check the branch out, and `g` opens its pull request. With [`gh`](https://cli.github.com/) logged in, each row also shows its CI result and
+   review state.
+
+`d` runs your dev servers in the selected worktree, with a readiness lamp per port, and `t` switches
+between eight colour themes. It is a fork of [claude-squad](https://github.com/smtg-ai/claude-squad); see
+[what changed](#differences-from-claude-squad).
 
 ## Quick start
 
@@ -29,11 +48,10 @@ cd ~/code/your-project     # any git repository
 adroit
 ```
 
-Press `n` to start a session, type a name, and you are attached to Claude Code
-in a fresh worktree. `ctrl-q` brings you back to the list; `?` shows every key.
+Press `N`, name the task, write the prompt and press `ctrl-s`. `?` shows every key.
 
-The installer ends by running `adroit doctor`, which says what is still missing
-and the command that installs it on your machine. Run it again any time.
+The installer ends by running `adroit doctor`, which says what is still missing and the command that
+installs it on your machine. Run it again any time.
 
 ## Requirements
 
