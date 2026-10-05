@@ -752,6 +752,36 @@ func TestConfirmedActionMessageReachesUpdateLoop(t *testing.T) {
 	})
 }
 
+// A pause removes the worktree, so the state file has to learn about it at
+// once: a crash before a clean quit otherwise restores the row as Running, in a
+// directory that is gone.
+func TestAPauseIsSavedImmediately(t *testing.T) {
+	const title = "pause-save-test"
+	dir := t.TempDir()
+	// What state.json says before the pause finishes: still running.
+	storageState := &fakeInstanceStorage{instances: json.RawMessage(fmt.Sprintf(
+		`[{"title":%q,"path":%q,"branch":"","status":%d,"no_worktree":true,"program":"claude"}]`,
+		title, dir, session.Running))}
+	storage, err := session.NewStorage(storageState)
+	require.NoError(t, err)
+
+	// The instance as the pause leaves it.
+	instance, err := session.FromInstanceData(session.InstanceData{
+		Title: title, Path: dir, Status: session.Paused, NoWorktree: true, Program: "claude"})
+	require.NoError(t, err)
+
+	h := newDevStackHome(t, dev.New(nil), &fakeAppState{})
+	h.storage = storage
+	_ = h.list.AddInstance(instance)
+
+	_, _ = h.Update(instancePausedMsg{instance: instance})
+
+	var saved []session.InstanceData
+	require.NoError(t, json.Unmarshal(storageState.instances, &saved))
+	require.Len(t, saved, 1)
+	require.Equal(t, session.Paused, saved[0].Status, "state.json still says the paused session is running")
+}
+
 // TestKillNoWorktreeSession pins that a session running in the repository itself
 // can be killed. It has no worktree, so the branch-checked-out check cannot run
 // against one: asking for the worktree returns an error, and returning that
