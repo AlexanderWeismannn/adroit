@@ -178,8 +178,13 @@ func portOf(s string) string {
 // server runs in <worktree>/client, so a prefix match is the right test -- but a
 // component-wise one, or /repo would match /repo-backup.
 func isUnder(path, worktree string) bool {
-	path = filepath.Clean(path)
-	worktree = filepath.Clean(worktree)
+	// Resolved, because the two sides come from different places: the owner's
+	// cwd from the kernel (lsof, /proc), which reports the real path, and the
+	// worktree as Adroit built it. Under a symlink -- every macOS temp directory
+	// is /var -> /private/var -- the stack's own server read as another
+	// worktree's.
+	path = resolvedPath(path)
+	worktree = resolvedPath(worktree)
 	if path == worktree {
 		return true
 	}
@@ -188,6 +193,13 @@ func isUnder(path, worktree string) bool {
 		return false
 	}
 	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+func resolvedPath(p string) string {
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		return r
+	}
+	return filepath.Clean(p)
 }
 
 // shorten trims a path to its last two components for display.
