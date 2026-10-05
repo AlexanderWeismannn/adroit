@@ -287,6 +287,13 @@ func repoKey(path string) string {
 			path = filepath.Join(home, strings.TrimPrefix(path, "~"))
 		}
 	}
+	// Resolved, because git reports the real path of a repository root and the
+	// config holds whatever the user typed: a key under a symlinked directory
+	// (macOS's /var -> /private/var, a home on another volume) would otherwise
+	// never match, and the repository silently gets the global settings.
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return resolved
+	}
 	return filepath.Clean(path)
 }
 

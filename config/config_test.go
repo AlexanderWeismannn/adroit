@@ -324,6 +324,19 @@ func TestDevForPicksTheRepositorysOwnStack(t *testing.T) {
 		},
 	}
 
+	// A key written through a symlink, looked up by the real path -- which is what
+	// git reports for a repository root. macOS puts every temp directory behind
+	// one (/var -> /private/var), and a home on another volume is another.
+	real := filepath.Join(t.TempDir(), "real-app")
+	if err := os.MkdirAll(real, 0755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "linked-app")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("cannot make a symlink: %v", err)
+	}
+	cfg.Repos[link] = &RepoConfig{Dev: &DevConfig{Command: "make dev"}}
+
 	tests := []struct {
 		name string
 		repo string
@@ -333,6 +346,7 @@ func TestDevForPicksTheRepositorysOwnStack(t *testing.T) {
 		{"a tilde key matches the expanded path", filepath.Join(home, "myapp") + "/", "npm run dev"},
 		{"an untidy path is cleaned before matching", "/srv/other-app/../other-app", "cargo watch -x run"},
 		{"a repository with no entry falls back", "/srv/unknown", "global"},
+		{"a key under a symlink matches the real path", real, "make dev"},
 		// Otherwise the only way to say "not here" would be to have no global
 		// stack at all, which takes it away from every other repository too.
 		{"an entry with no command is an explicit no", "/srv/no-stack", ""},

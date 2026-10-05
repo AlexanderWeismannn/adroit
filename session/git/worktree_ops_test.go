@@ -178,7 +178,9 @@ func TestSetupFromExistingBranch_AdoptsWorktreeHoldingBranchElsewhere(t *testing
 		t.Fatalf("Setup() error = %v", err)
 	}
 
-	if got := g.GetWorktreePath(); got != strandedPath {
+	// git reports the real path, so compare resolved: on macOS the temp
+	// directory is /var/..., which is a symlink to /private/var/....
+	if got := g.GetWorktreePath(); !samePath(got, strandedPath) {
 		t.Fatalf("GetWorktreePath() = %q, want the stranded worktree %q", got, strandedPath)
 	}
 	if _, err := os.Stat(workPath); err != nil {

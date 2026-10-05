@@ -2,6 +2,7 @@ package dev_test
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -90,7 +92,10 @@ func waitReady(t *testing.T, s *dev.Stack, title string) {
 		time.Sleep(200 * time.Millisecond)
 	}
 	b, _ := json.Marshal(s.Snapshot())
-	pane, _ := s.CaptureHistory()
+	pane, err := s.CaptureHistory()
+	if err != nil {
+		pane = "(capture failed: " + err.Error() + ")"
+	}
 	t.Fatalf("stack for %s never came up: %s\n--- pane ---\n%s", title, b, pane)
 }
 
@@ -137,8 +142,14 @@ func TestStopKillsAChildInItsOwnProcessGroup(t *testing.T) {
 	marker := filepath.Join(home, "grandchild.pid")
 
 	cfg := &config.DevConfig{
-		// setsid is the escape: the child leads a new session and group.
-		Command:             `setsid sleep 600 & echo $! > ` + marker + `; wait`,
+		// setsid is the escape: the child leads a new session and group. Done in
+		// python rather than with setsid(1), which macOS does not ship; it forks
+		// first when it already leads a group, as setsid(1) does, and records its
+		// own pid since that is the process that must die.
+		Command: `python3 -c 'import os,sys,time` + "\n" +
+			`if os.getpgrp() == os.getpid() and os.fork(): os._exit(0)` + "\n" +
+			`os.setsid(); open(sys.argv[1], "w").write(str(os.getpid())); time.sleep(600)' ` +
+			marker + ` & wait`,
 		ReadyTimeoutSeconds: 5,
 	}
 	s := dev.New(cfg)
@@ -169,9 +180,11 @@ func TestStopKillsAChildInItsOwnProcessGroup(t *testing.T) {
 	}
 }
 
+// processAlive asks the kernel rather than /proc, which macOS does not have.
+// EPERM still means the process exists.
 func processAlive(pid int) bool {
-	_, err := os.Stat("/proc/" + strconv.Itoa(pid))
-	return err == nil
+	err := syscall.Kill(pid, 0)
+	return err == nil || errors.Is(err, syscall.EPERM)
 }
 
 func waitUntil(d time.Duration, cond func() bool) bool {
