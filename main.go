@@ -195,7 +195,8 @@ var (
 )
 
 func init() {
-	rootCmd.Flags().StringVarP(&programFlag, "program", "p", "",
+	// Persistent so `adroit doctor -p codex` checks the program it names.
+	rootCmd.PersistentFlags().StringVarP(&programFlag, "program", "p", "",
 		"Program to run in new instances (e.g. 'aider --model ollama_chat/gemma3:1b')")
 	rootCmd.Flags().BoolVarP(&autoYesFlag, "autoyes", "y", false,
 		"[experimental] If enabled, all instances will automatically accept prompts")

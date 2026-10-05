@@ -30,7 +30,7 @@ var doctorCmd = &cobra.Command{
 		log.Initialize(false)
 		defer log.CloseQuietly()
 
-		cfg := config.LoadConfig()
+		cfg := config.PeekConfig()
 		program := cfg.GetProgram()
 		if programFlag != "" {
 			program = programFlag

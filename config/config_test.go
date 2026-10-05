@@ -463,3 +463,21 @@ func TestGetProgramRepairsAPathFromAnotherMachine(t *testing.T) {
 		t.Fatalf("GetProgram() = %q, want the unresolvable path returned as-is", got)
 	}
 }
+
+// doctor reports and the installer runs it, so reading the config for it must
+// not create ~/.adroit on a machine where Adroit has never been started.
+func TestPeekConfigNeverWritesAConfig(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	cfg := PeekConfig()
+	if cfg == nil {
+		t.Fatal("PeekConfig() = nil, want the defaults")
+	}
+	if _, err := os.Stat(filepath.Join(home, ".adroit")); !os.IsNotExist(err) {
+		t.Fatalf("PeekConfig created %s/.adroit (err=%v)", home, err)
+	}
+	LoadConfig()
+	if _, err := os.Stat(filepath.Join(home, ".adroit", ConfigFileName)); err != nil {
+		t.Fatalf("LoadConfig should still write the defaults on first run: %v", err)
+	}
+}
