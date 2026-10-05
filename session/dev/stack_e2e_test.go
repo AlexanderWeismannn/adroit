@@ -35,12 +35,15 @@ func TestStackStartsSwitchesAndStops(t *testing.T) {
 	cfg := &config.DevConfig{
 		// Reads the port from the ENVIRONMENT at runtime, which is the thing under
 		// test: the env has to reach the process, not merely the command line.
-		// http.server.HTTPServer, not a bare socketserver.TCPServer: it sets
-		// SO_REUSEADDR, as node and webpack-dev-server both do. Without it the
-		// TIME_WAIT left by this test's own probes blocks the rebind, and the
-		// test measures a socket option instead of the teardown sequence.
-		Command: `python3 -c 'import os,http.server;` +
-			`http.server.HTTPServer(("127.0.0.1", int(os.environ["SERVE_PORT"])),` +
+		// allow_reuse_address sets SO_REUSEADDR, as node and webpack-dev-server
+		// both do. Without it the TIME_WAIT left by this test's own probes blocks
+		// the rebind, and the test measures a socket option instead of the
+		// teardown sequence. Not http.server.HTTPServer, which would set it too:
+		// it calls getfqdn() between bind and listen, and on macOS that reverse
+		// lookup can outlast the whole readiness timeout.
+		Command: `python3 -c 'import os,socketserver,http.server;` +
+			`socketserver.TCPServer.allow_reuse_address = True;` +
+			`socketserver.TCPServer(("127.0.0.1", int(os.environ["SERVE_PORT"])),` +
 			` http.server.SimpleHTTPRequestHandler).serve_forever()'`,
 		Env:                 map[string]string{"SERVE_PORT": "39117"},
 		Checks:              []config.DevCheck{{Name: "web", Type: "http", Target: "http://127.0.0.1:39117/", OwnCwd: true}},
