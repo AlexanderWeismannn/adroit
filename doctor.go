@@ -1,11 +1,13 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 
@@ -78,6 +80,10 @@ func runDoctor(w io.Writer, program string) (failed int) {
 			why:   "this is what each session runs (`default_program` in the config, or -p)",
 			run: func() (string, bool) {
 				path, err := resolveProgram(program)
+				if errors.Is(err, errUnverifiable) {
+					// Reported, not failed: the shell may well find it.
+					return fmt.Sprintf("%s (%q %v)", program, path, err), true
+				}
 				if err != nil {
 					return fmt.Sprintf("%q not found", program), false
 				}
@@ -195,16 +201,56 @@ func versionOf(tool string, args ...string) func() (string, bool) {
 	}
 }
 
-// resolveProgram finds the executable at the front of a program string such as
-// "claude" or "aider --model x". For claude it also asks the login shell, which
-// is how config.GetClaudeCommand finds an install that only an rc file puts on
-// PATH.
-func resolveProgram(program string) (string, error) {
+// errUnverifiable means the program string runs through a shell in a way this
+// cannot follow -- a variable, a substitution -- so whether it starts is left to
+// tmux rather than refused here.
+var errUnverifiable = errors.New("cannot be checked without running it")
+
+var envAssignment = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
+
+// programExecutable picks the word of a program string that names what runs.
+// tmux hands the whole string to a shell, so "FOO=1 claude", "env FOO=1 claude"
+// and "~/bin/aider" all start fine; looking up the first word as given refused
+// every one of them, and with them the whole app.
+func programExecutable(program string) (string, error) {
 	fields := strings.Fields(program)
-	if len(fields) == 0 {
+	i := 0
+	for i < len(fields) && envAssignment.MatchString(fields[i]) {
+		i++
+	}
+	if i < len(fields) && fields[i] == "env" {
+		i++
+		for i < len(fields) && (envAssignment.MatchString(fields[i]) || strings.HasPrefix(fields[i], "-")) {
+			switch fields[i] {
+			case "-u", "-C", "-S", "--unset", "--chdir", "--split-string":
+				i++ // these take the next word as their value
+			}
+			i++
+		}
+	}
+	if i >= len(fields) {
 		return "", fmt.Errorf("no program configured")
 	}
-	name := fields[0]
+	name := fields[i]
+	if strings.ContainsAny(name, "$`(){}|;&<>") {
+		return name, errUnverifiable
+	}
+	if name == "~" || strings.HasPrefix(name, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			name = filepath.Join(home, strings.TrimPrefix(name, "~"))
+		}
+	}
+	return name, nil
+}
+
+// resolveProgram finds the executable a program string such as "claude" or
+// "aider --model x" runs. For claude it also asks the login shell, which is how
+// config.GetClaudeCommand finds an install that only an rc file puts on PATH.
+func resolveProgram(program string) (string, error) {
+	name, err := programExecutable(program)
+	if err != nil {
+		return name, err
+	}
 	if path, err := exec.LookPath(name); err == nil {
 		return path, nil
 	}
@@ -266,10 +312,10 @@ func preflight(program string) error {
 			missing = append(missing, tool)
 		}
 	}
-	if _, err := resolveProgram(program); err != nil {
-		name := program
-		if fields := strings.Fields(program); len(fields) > 0 {
-			name = fields[0]
+	if _, err := resolveProgram(program); err != nil && !errors.Is(err, errUnverifiable) {
+		name, _ := programExecutable(program)
+		if name == "" {
+			name = program
 		}
 		missing = append(missing, fmt.Sprintf("%q (the agent program)", name))
 	}
