@@ -183,7 +183,15 @@ def record(adroit, cast_path):
         for _ in range(3):
             keys(UP, 1.0)
         keys(ESC, 1.2)
-        # 6. attach, say something, detach
+        # 6. settings: add the OpenAI agent and give it a key (a fake one; it is
+        #    masked as it is typed and stored outside config.json)
+        keys("s", 1.6)
+        keys("a", 1.0); keys(DOWN, 0.6); keys(ENTER, 1.6)
+        keys("s", 0.8); typed("sk-proj-demo0000000000000000demo", 0.025, 0.6); keys(ENTER, 2.2)
+        keys(TAB, 0.6); keys(ENTER, 1.2); keys(DOWN, 0.4); keys(DOWN, 0.4); keys(ENTER, 1.0)
+        keys(DOWN, 0.5); keys(DOWN, 0.5); keys(ENTER, 2.0)
+        keys(ESC, 0.4); keys(ESC, 1.0)
+        # 7. attach, say something, detach
         keys(ENTER, 2.4); typed("thanks, ship it", 0.05, 0.3); keys(ENTER, 2.4); keys(CTRL_Q, 2.2)
 
         done.set()
