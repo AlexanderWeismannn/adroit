@@ -139,3 +139,17 @@ func TestSettingsKeyCheck(t *testing.T) {
 	s.HandleCheck(SettingsCheckMsg{Profile: "claude", Detail: "invalid x-api-key"})
 	require.Contains(t, s.Render(), "invalid x-api-key")
 }
+
+// A field's value is shown on one line: a long dev command used to wrap across
+// the box and push the other fields out of view.
+func TestSettingsKeepsALongValueOnOneLine(t *testing.T) {
+	s, _, _ := newTestSettings(t)
+	s.cfg.Repos["/work/api"] = &config.RepoConfig{Dev: &config.DevConfig{Command: strings.Repeat("npm run dev && ", 30)}}
+	press(s, "tab", "enter")
+	view := s.Render()
+	for _, line := range strings.Split(view, "\n") {
+		if strings.Contains(line, "npm run dev") {
+			require.Contains(t, line, "dev command", "the command spilled onto a line of its own")
+		}
+	}
+}

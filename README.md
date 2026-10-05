@@ -17,7 +17,7 @@ Adroit is a terminal app for running [Claude Code](https://github.com/anthropics
 tmux session, and one screen shows all of them: what each agent is doing, what it changed, and whether
 its build passed.
 
-![Three agents working at once in Adroit; then a diff, the dev stack starting, the theme picker, and attaching to a session](assets/demo.gif)
+![Three agents working at once in Adroit; then a diff, the dev stack starting, the theme picker, adding an OpenAI agent and its key in settings, and attaching to a session](assets/demo.gif)
 
 <sub>Recorded from the real app. The agent is a scripted stand-in so the recording is repeatable; see
 [`demo/record.py`](demo/record.py).</sub>

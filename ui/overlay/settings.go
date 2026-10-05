@@ -729,7 +729,9 @@ func (s *Settings) Render() string {
 		} else {
 			b.WriteString(text.Render(shortPath(s.repo)) + "\n\n")
 			for i, f := range s.workspaceFields(s.repo) {
-				row(i, fmt.Sprintf("%-18s %s", f.label, f.value()))
+				// One line each: a dev command is often longer than the box, and
+				// wrapping it pushed every other field out of view.
+				row(i, fmt.Sprintf("%-18s %s", f.label, clipText(f.value(), width-28)))
 			}
 			if f := s.workspaceFields(s.repo); s.cursor[tabWorkspaces] < len(f) && f[s.cursor[tabWorkspaces]].hint != "" {
 				b.WriteString("\n" + muted.Render(f[s.cursor[tabWorkspaces]].hint) + "\n")
@@ -738,7 +740,7 @@ func (s *Settings) Render() string {
 	case tabGeneral:
 		fields := s.generalFields()
 		for i, f := range fields {
-			row(i, fmt.Sprintf("%-22s %s", f.label, f.value()))
+			row(i, fmt.Sprintf("%-22s %s", f.label, clipText(f.value(), width-32)))
 		}
 		if i := s.cursor[tabGeneral]; i < len(fields) && fields[i].hint != "" {
 			b.WriteString("\n" + muted.Render(fields[i].hint) + "\n")
