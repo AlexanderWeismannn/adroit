@@ -39,6 +39,19 @@ func TestIsUnderRejectsSiblingWithSharedPrefix(t *testing.T) {
 		{"/home/a", "/home/a/wt", false},
 		{"/home/a/wt/./client", "/home/a/wt", true},
 	}
+	// The kernel reports a process's cwd by its real path; the worktree may be
+	// reached through a symlink, as every macOS temp directory is.
+	real := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(real, "client"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "wt")
+	if err := os.Symlink(real, link); err == nil {
+		cases = append(cases, struct {
+			path, worktree string
+			want           bool
+		}{filepath.Join(real, "client"), link, true})
+	}
 	for _, c := range cases {
 		if got := isUnder(c.path, c.worktree); got != c.want {
 			t.Errorf("isUnder(%q, %q) = %v, want %v", c.path, c.worktree, got, c.want)

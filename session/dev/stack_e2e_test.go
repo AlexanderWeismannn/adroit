@@ -2,6 +2,7 @@ package dev_test
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -33,12 +35,15 @@ func TestStackStartsSwitchesAndStops(t *testing.T) {
 	cfg := &config.DevConfig{
 		// Reads the port from the ENVIRONMENT at runtime, which is the thing under
 		// test: the env has to reach the process, not merely the command line.
-		// http.server.HTTPServer, not a bare socketserver.TCPServer: it sets
-		// SO_REUSEADDR, as node and webpack-dev-server both do. Without it the
-		// TIME_WAIT left by this test's own probes blocks the rebind, and the
-		// test measures a socket option instead of the teardown sequence.
-		Command: `python3 -c 'import os,http.server;` +
-			`http.server.HTTPServer(("127.0.0.1", int(os.environ["SERVE_PORT"])),` +
+		// allow_reuse_address sets SO_REUSEADDR, as node and webpack-dev-server
+		// both do. Without it the TIME_WAIT left by this test's own probes blocks
+		// the rebind, and the test measures a socket option instead of the
+		// teardown sequence. Not http.server.HTTPServer, which would set it too:
+		// it calls getfqdn() between bind and listen, and on macOS that reverse
+		// lookup can outlast the whole readiness timeout.
+		Command: `python3 -c 'import os,socketserver,http.server;` +
+			`socketserver.TCPServer.allow_reuse_address = True;` +
+			`socketserver.TCPServer(("127.0.0.1", int(os.environ["SERVE_PORT"])),` +
 			` http.server.SimpleHTTPRequestHandler).serve_forever()'`,
 		Env:                 map[string]string{"SERVE_PORT": "39117"},
 		Checks:              []config.DevCheck{{Name: "web", Type: "http", Target: "http://127.0.0.1:39117/", OwnCwd: true}},
@@ -90,7 +95,10 @@ func waitReady(t *testing.T, s *dev.Stack, title string) {
 		time.Sleep(200 * time.Millisecond)
 	}
 	b, _ := json.Marshal(s.Snapshot())
-	pane, _ := s.CaptureHistory()
+	pane, err := s.CaptureHistory()
+	if err != nil {
+		pane = "(capture failed: " + err.Error() + ")"
+	}
 	t.Fatalf("stack for %s never came up: %s\n--- pane ---\n%s", title, b, pane)
 }
 
@@ -137,8 +145,14 @@ func TestStopKillsAChildInItsOwnProcessGroup(t *testing.T) {
 	marker := filepath.Join(home, "grandchild.pid")
 
 	cfg := &config.DevConfig{
-		// setsid is the escape: the child leads a new session and group.
-		Command:             `setsid sleep 600 & echo $! > ` + marker + `; wait`,
+		// setsid is the escape: the child leads a new session and group. Done in
+		// python rather than with setsid(1), which macOS does not ship; it forks
+		// first when it already leads a group, as setsid(1) does, and records its
+		// own pid since that is the process that must die.
+		Command: `python3 -c 'import os,sys,time` + "\n" +
+			`if os.getpgrp() == os.getpid() and os.fork(): os._exit(0)` + "\n" +
+			`os.setsid(); open(sys.argv[1], "w").write(str(os.getpid())); time.sleep(600)' ` +
+			marker + ` & wait`,
 		ReadyTimeoutSeconds: 5,
 	}
 	s := dev.New(cfg)
@@ -169,9 +183,11 @@ func TestStopKillsAChildInItsOwnProcessGroup(t *testing.T) {
 	}
 }
 
+// processAlive asks the kernel rather than /proc, which macOS does not have.
+// EPERM still means the process exists.
 func processAlive(pid int) bool {
-	_, err := os.Stat("/proc/" + strconv.Itoa(pid))
-	return err == nil
+	err := syscall.Kill(pid, 0)
+	return err == nil || errors.Is(err, syscall.EPERM)
 }
 
 func waitUntil(d time.Duration, cond func() bool) bool {

@@ -132,7 +132,7 @@ func (g *GitWorktree) setupFromExistingBranch() error {
 	// unstartable. That happens whenever the worktree outlives the state entry that
 	// named it: a config directory that moved, a state file reset, a hand-edited path.
 	// Adopt the existing worktree instead; it is where the work actually is.
-	if held, err := g.worktreeHoldingBranch(); err == nil && held != "" && held != g.worktreePath {
+	if held, err := g.worktreeHoldingBranch(); err == nil && held != "" && !samePath(held, g.worktreePath) {
 		if _, statErr := os.Stat(held); statErr == nil {
 			if err := adoptable(held); err != nil {
 				return fmt.Errorf("branch %s is already checked out at %s: %w", g.branchName, held, err)
