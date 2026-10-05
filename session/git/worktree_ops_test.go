@@ -190,6 +190,15 @@ func TestSetupFromExistingBranch_AdoptsWorktreeHoldingBranchElsewhere(t *testing
 	if got := g.GetBaseCommitSHA(); got != want {
 		t.Fatalf("GetBaseCommitSHA() = %q, want %q", got, want)
 	}
+
+	// And if the session then fails to start, giving up must leave the adopted
+	// worktree as it was found: removing it would destroy the work above.
+	if err := g.AbandonSetup(); err != nil {
+		t.Fatalf("AbandonSetup() error = %v", err)
+	}
+	if _, err := os.Stat(workPath); err != nil {
+		t.Fatalf("a failed start destroyed the adopted worktree's work: %v", err)
+	}
 }
 
 // A registration left over for a directory that is gone must not block the add.
