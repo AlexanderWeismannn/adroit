@@ -455,7 +455,15 @@ func GetClaudeCommand() (string, error) {
 	return "", fmt.Errorf("claude command not found in aliases or PATH")
 }
 
-func LoadConfig() *Config {
+func LoadConfig() *Config { return loadConfig(true) }
+
+// PeekConfig reads the config like LoadConfig but never writes one. For
+// commands that only report: `adroit doctor` used to create ~/.adroit with a
+// default config -- branch prefix and all -- on a machine where Adroit had
+// never run, and the installer runs doctor.
+func PeekConfig() *Config { return loadConfig(false) }
+
+func loadConfig(save bool) *Config {
 	configDir, err := GetConfigDir()
 	if err != nil {
 		log.ErrorLog.Printf("failed to get config directory: %v", err)
@@ -468,8 +476,10 @@ func LoadConfig() *Config {
 		if os.IsNotExist(err) {
 			// Create and save default config if file doesn't exist
 			defaultCfg := DefaultConfig()
-			if saveErr := saveConfig(defaultCfg); saveErr != nil {
-				log.WarningLog.Printf("failed to save default config: %v", saveErr)
+			if save {
+				if saveErr := saveConfig(defaultCfg); saveErr != nil {
+					log.WarningLog.Printf("failed to save default config: %v", saveErr)
+				}
 			}
 			return defaultCfg
 		}

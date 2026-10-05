@@ -587,3 +587,39 @@ func TestDiffCountsUntrackedFilesWithoutTouchingTheIndex(t *testing.T) {
 		t.Fatalf("the agent's index was changed: git status = %q", status)
 	}
 }
+
+// Pausing removes the worktree and keeps the branch, so resuming finds the
+// branch already there. That must not make it look like someone else's: it is
+// still the branch this session created, and killing the session deletes it.
+func TestAResumedSessionStillOwnsItsBranch(t *testing.T) {
+	withTempHome(t)
+	repoPath := filepath.Join(t.TempDir(), "repo")
+	mustRunGit(t, "", "init", repoPath)
+	mustRunGit(t, repoPath, "config", "user.name", "Test User")
+	mustRunGit(t, repoPath, "config", "user.email", "test@example.com")
+	if err := os.WriteFile(filepath.Join(repoPath, "README.md"), []byte("hello\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	mustRunGit(t, repoPath, "add", "README.md")
+	mustRunGit(t, repoPath, "commit", "-m", "initial")
+
+	g, branch, err := NewGitWorktree(repoPath, "resume-owns-branch")
+	if err != nil {
+		t.Fatalf("NewGitWorktree: %v", err)
+	}
+	if err := g.Setup(); err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	if err := g.Remove(); err != nil { // what a pause does to the worktree
+		t.Fatalf("Remove: %v", err)
+	}
+	if err := g.SetupForResume(); err != nil {
+		t.Fatalf("SetupForResume: %v", err)
+	}
+	if err := g.Cleanup(); err != nil { // what a kill does
+		t.Fatalf("Cleanup: %v", err)
+	}
+	if out, err := exec.Command("git", "-C", repoPath, "show-ref", "--verify", "refs/heads/"+branch).CombinedOutput(); err == nil {
+		t.Fatalf("branch %s survived the kill of the session that created it (%s)", branch, out)
+	}
+}

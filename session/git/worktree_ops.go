@@ -11,7 +11,16 @@ import (
 )
 
 // Setup creates a new worktree for the session
-func (g *GitWorktree) Setup() error {
+func (g *GitWorktree) Setup() error { return g.setup(false) }
+
+// SetupForResume re-adds the worktree of a paused session from its branch.
+//
+// Not Setup: Setup takes a branch it finds already existing as someone else's
+// and stops owning it, so every pause and resume turned a branch Adroit created
+// into one a kill would leave behind.
+func (g *GitWorktree) SetupForResume() error { return g.setup(true) }
+
+func (g *GitWorktree) setup(resume bool) error {
 	// Ensure worktrees directory exists early (can be done in parallel with branch check)
 	worktreesDir, err := getWorktreeDirectory()
 	if err != nil {
@@ -24,7 +33,7 @@ func (g *GitWorktree) Setup() error {
 
 	// If this worktree uses a pre-existing branch, always set up from that branch
 	// (it may exist locally or only on the remote).
-	if g.isExistingBranch {
+	if g.isExistingBranch || resume {
 		return g.setupFromExistingBranch()
 	}
 

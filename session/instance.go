@@ -960,7 +960,7 @@ func (i *Instance) Resume() error {
 			log.WarningLog.Printf("could not validate worktree at %s, recreating it: %v",
 				i.gitWorktree.GetWorktreePath(), err)
 		}
-		if err := i.gitWorktree.Setup(); err != nil {
+		if err := i.gitWorktree.SetupForResume(); err != nil {
 			log.ErrorLog.Print(err)
 			return fmt.Errorf("failed to setup git worktree: %w", err)
 		}
