@@ -34,10 +34,18 @@ fixed script of keys. [agg](https://github.com/asciinema/agg) renders the result
 
 ```bash
 go build -o /tmp/adroit . && python3 demo/record.py /tmp/adroit /tmp/demo.cast
-agg --theme nord --font-size 17 --idle-time-limit 2 /tmp/demo.cast assets/demo.gif
-# the site plays an MP4 instead: sharper, and it can pause
-ffmpeg -i assets/demo.gif -movflags +faststart -pix_fmt yuv420p \
+agg --theme nord --font-size 17 --idle-time-limit 2 /tmp/demo.cast /tmp/raw.gif
+
+# The site plays an MP4: sharper, and it can pause. site/poster.png is a frame
+# from about 40% in, where three sessions are visible at once.
+ffmpeg -i /tmp/raw.gif -movflags +faststart -pix_fmt yuv420p \
   -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" -c:v libx264 -crf 22 site/demo.mp4
+
+# The README GIF opens on that poster frame for two seconds, so the still image
+# GitHub shows while it loads is not an empty screen.
+ffmpeg -loop 1 -t 2 -i site/poster.png -i /tmp/raw.gif -filter_complex \
+  "[0:v]fps=10,format=rgb24[a];[1:v]fps=10,format=rgb24[b];[a][b]concat=n=2:v=1[v];[v]split[x][y];[x]palettegen=max_colors=96:stats_mode=diff[p];[y][p]paletteuse=dither=none:diff_mode=rectangle" \
+  -loop 0 assets/demo.gif
 ```
 
 Re-record it when the interface changes.
