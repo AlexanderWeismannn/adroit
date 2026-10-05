@@ -33,6 +33,25 @@ if pgrep -x cs >/dev/null || pgrep -x adroit >/dev/null; then
   exit 1
 fi
 
+# Every reason to stop is checked before anything changes. These used to be
+# found part way through -- after the tmux sessions had already been renamed,
+# or after the directory had moved but before its paths were rewritten -- and
+# left claude-squad and Adroit each half-pointing at the other's state.
+if [[ -d "$NEW_DIR" && -f "$NEW_DIR/state.json" && -d "$OLD_DIR" && -f "$OLD_DIR/state.json" ]]; then
+  echo "ERROR: both $OLD_DIR and $NEW_DIR track sessions (each has a state.json)." >&2
+  echo "       Nothing was changed. Keep one of them, move the other aside, and re-run." >&2
+  exit 1
+fi
+if [[ -f "$OLD_DIR/state.json" ]] && ! python3 -c 'import json' >/dev/null 2>&1; then
+  echo "ERROR: python3 is needed to rewrite the worktree paths in state.json, and it does not run." >&2
+  echo "       Nothing was changed. On macOS: xcode-select --install" >&2
+  exit 1
+fi
+if [[ -d "$OLD_DIR/worktrees" ]] && ! command -v git >/dev/null 2>&1; then
+  echo "ERROR: git is needed to repair the worktree links. Nothing was changed." >&2
+  exit 1
+fi
+
 echo "== 1. back up state =="
 if [[ -f "$OLD_DIR/state.json" ]]; then
   run cp -a "$OLD_DIR/state.json" "$BACKUP/state.json"
