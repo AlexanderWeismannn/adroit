@@ -4,7 +4,7 @@
 
 **Run several coding agents at once, without them stepping on each other.**
 
-[![Release](https://img.shields.io/github/v/release/AlexanderWeismannn/adroit)](https://github.com/AlexanderWeismannn/adroit/releases)
+[![Release](https://img.shields.io/github/v/release/AlexanderWeismannn/adroit?sort=semver)](https://github.com/AlexanderWeismannn/adroit/releases)
 [![Build](https://github.com/AlexanderWeismannn/adroit/actions/workflows/build.yml/badge.svg)](https://github.com/AlexanderWeismannn/adroit/actions/workflows/build.yml)
 [![Website](https://img.shields.io/badge/site-adroit-88c0d0)](https://alexanderweismannn.github.io/adroit/)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE.md)
