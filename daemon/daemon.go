@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"errors"
 	"fmt"
 	"github.com/AlexanderWeismannn/adroit/config"
 	"github.com/AlexanderWeismannn/adroit/log"
@@ -9,6 +10,8 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -148,20 +151,65 @@ func StopDaemon() error {
 		return fmt.Errorf("invalid PID file format: %w", err)
 	}
 
+	// The file outlives the daemon -- a reboot, a crash -- and the OS hands its
+	// pid to the next process that asks. Killing whatever holds that pid now has
+	// SIGKILLed the user's tmux server, and with it every session. So only a
+	// process that is still this program's daemon is killed; a stale file is
+	// just removed.
+	if !isDaemonProcess(pid) {
+		log.InfoLog.Printf("daemon.pid names %d, which is not a running daemon; removing it", pid)
+		if err := os.Remove(pidFile); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("failed to remove stale PID file: %w", err)
+		}
+		return nil
+	}
+
 	proc, err := os.FindProcess(pid)
 	if err != nil {
 		return fmt.Errorf("failed to find daemon process: %w", err)
 	}
 
-	if err := proc.Kill(); err != nil {
+	if err := proc.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
 		return fmt.Errorf("failed to stop daemon process: %w", err)
 	}
 
 	// Clean up PID file
-	if err := os.Remove(pidFile); err != nil {
+	if err := os.Remove(pidFile); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove PID file: %w", err)
 	}
 
 	log.InfoLog.Printf("daemon process (PID: %d) stopped successfully", pid)
 	return nil
+}
+
+// isDaemonProcess reports whether pid is alive and running this program with
+// --daemon. ps, rather than /proc, so it answers the same on macOS.
+func isDaemonProcess(pid int) bool {
+	if pid <= 1 {
+		return false
+	}
+	out, err := exec.Command("ps", "-o", "args=", "-p", strconv.Itoa(pid)).Output()
+	if err != nil {
+		return false // no such process
+	}
+	args := strings.Fields(strings.TrimSpace(string(out)))
+	if len(args) == 0 {
+		return false
+	}
+	hasFlag := false
+	for _, a := range args[1:] {
+		if a == "--daemon" {
+			hasFlag = true
+		}
+	}
+	return hasFlag && filepath.Base(args[0]) == filepath.Base(executableName())
+}
+
+// executableName is this binary's name as it runs, so a renamed or symlinked
+// install (adroit, cs) still recognises its own daemon.
+func executableName() string {
+	if p, err := os.Executable(); err == nil {
+		return p
+	}
+	return os.Args[0]
 }
