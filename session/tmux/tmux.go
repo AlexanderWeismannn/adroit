@@ -124,7 +124,12 @@ var whiteSpaceRegex = regexp.MustCompile(`\s+`)
 
 func toAdroitTmuxName(str string) string {
 	str = whiteSpaceRegex.ReplaceAllString(str, "")
-	str = strings.ReplaceAll(str, ".", "_") // tmux replaces all . with _
+	// tmux rewrites both of these to _ on its own (they are its target
+	// separators), so a name containing one was created under a name nothing
+	// here would look for: the session ran on, unreachable, and the start that
+	// "timed out" cleaned up its worktree underneath it.
+	str = strings.ReplaceAll(str, ".", "_")
+	str = strings.ReplaceAll(str, ":", "_")
 	return fmt.Sprintf("%s%s", TmuxPrefix, str)
 }
 

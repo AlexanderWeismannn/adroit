@@ -523,6 +523,37 @@ func TestTitleForBranch(t *testing.T) {
 	})
 }
 
+// Titles that tmux turns into the same session name are one session: both rows
+// attach to the same agent and killing either kills both. The typed name has to
+// be refused before anything is created for it.
+func TestTitleCollisionComparesTmuxNames(t *testing.T) {
+	mk := func(title string) *session.Instance {
+		inst, err := session.NewInstance(session.InstanceOptions{Title: title, Path: ".", Program: "echo"})
+		require.NoError(t, err)
+		return inst
+	}
+	existing := []*session.Instance{mk("fixlogin"), mk("api.v2"), mk("docs")}
+
+	for _, title := range []string{"fix login", "api:v2", "api v2"} {
+		inst := mk(title)
+		if title == "api v2" {
+			// Only whitespace is dropped; "apiv2" is a different tmux name from "api_v2".
+			require.NoError(t, titleCollision(inst, existing), title)
+			continue
+		}
+		err := titleCollision(inst, existing)
+		require.Error(t, err, title)
+		require.Contains(t, err.Error(), "too close", title)
+	}
+
+	err := titleCollision(mk("docs"), existing)
+	require.ErrorContains(t, err, "already exists")
+
+	// The row being named is in the list too, and must not collide with itself.
+	self := mk("docs-2")
+	require.NoError(t, titleCollision(self, append(existing, self)))
+}
+
 // Cancelling has to put back the palette that was in use, and it is the app that
 // installs previews, so it is the app that must restore. A picker that both
 // previewed and remembered would have to get this right in every exit path.

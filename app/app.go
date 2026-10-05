@@ -852,6 +852,9 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 			if len(instance.Title) == 0 {
 				return m, m.handleError(fmt.Errorf("title cannot be empty"))
 			}
+			if err := titleCollision(instance, m.list.GetInstances()); err != nil {
+				return m, m.handleError(err)
+			}
 
 			// If promptAfterName, show prompt+branch overlay before starting
 			if m.promptAfterName {
@@ -2106,6 +2109,28 @@ func titleForRepo(path string, existing []*session.Instance) string {
 	}
 }
 
+// titleCollision refuses a name whose tmux session another session already has.
+//
+// Compared by tmux name, not by title: tmux drops whitespace and turns "." and
+// ":" into "_", so "fix login" and "fixlogin" are one tmux session. Two rows on
+// one session attach to the same agent, and killing either kills both.
+func titleCollision(inst *session.Instance, existing []*session.Instance) error {
+	want := tmux.SessionNameFor(inst.Title)
+	for _, other := range existing {
+		if other == inst || other.Title == "" {
+			continue
+		}
+		if tmux.SessionNameFor(other.Title) == want {
+			if other.Title == inst.Title {
+				return fmt.Errorf("a session named %q already exists", inst.Title)
+			}
+			return fmt.Errorf("%q is too close to the existing session %q: both become tmux session %s",
+				inst.Title, other.Title, want)
+		}
+	}
+	return nil
+}
+
 // titleForBranch names a session after the branch it is opening.
 //
 // The branch name is used verbatim: the 32-character cap on the name prompt is a
@@ -2120,7 +2145,7 @@ func titleForBranch(branch string, existing []*session.Instance) (string, error)
 	// Title is the storage key and the tmux session name, so a collision would
 	// otherwise surface much later as "tmux session already exists".
 	for _, inst := range existing {
-		if inst.Title == branch {
+		if tmux.SessionNameFor(inst.Title) == tmux.SessionNameFor(branch) {
 			return "", fmt.Errorf("a session for branch %q already exists", branch)
 		}
 	}

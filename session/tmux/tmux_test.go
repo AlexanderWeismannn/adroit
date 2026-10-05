@@ -52,6 +52,10 @@ func TestSanitizeName(t *testing.T) {
 
 	session = NewTmuxSession("a sd f . . asdf", "program")
 	require.Equal(t, TmuxPrefix+"asdf__asdf", session.sanitizedName)
+
+	// The name tmux would have stored anyway; anything else is unfindable.
+	session = NewTmuxSession("fix: login", "program")
+	require.Equal(t, TmuxPrefix+"fix_login", session.sanitizedName)
 }
 
 func TestStartTmuxSession(t *testing.T) {
