@@ -66,7 +66,8 @@ tmux is the session model, so native Windows is not supported.
 | [gh](https://cli.github.com/), logged in (`gh auth login`) | *optional* — CI status, pull-request state, `g` | `brew install gh` | [GitHub's apt repo](https://github.com/cli/cli/blob/trunk/docs/install_linux.md) |
 
 Adroit refuses to start without git, tmux and the agent, and says which is
-missing. Without `gh` everything works except the CI and pull-request columns.
+missing. Without `gh`, `p` (push) and `g` (open the pull request) do not work and the CI and
+pull-request columns stay empty; everything else does.
 
 The optional dev stack (`d`) also uses `ss` or `lsof` to tell which worktree owns
 a port; without them its readiness lamps still work.
@@ -142,6 +143,7 @@ Flags:
   -y, --autoyes          [experimental] If enabled, all instances will automatically accept prompts
   -h, --help             help for adroit
   -p, --program string   Program to run in new instances (e.g. 'aider --model ollama_chat/gemma3:1b')
+      --skip-claude-squad-migration   Start fresh instead of migrating existing claude-squad sessions
 ```
 
 Run it from inside a git repository. One Adroit runs at a time; closing the
@@ -163,30 +165,34 @@ The menu at the bottom of the screen shows what is available in the current cont
 ### Sessions
 
 - `n` — new session
-- `N` — new session, prompting for its first message
+- `N` — new session with a first prompt, an agent profile and a branch to start on
 - `tab` at the name prompt — start on an existing branch, or on none at all
 - `D` — kill the selected session
-- `↑`/`k`, `↓`/`j` — move between sessions
+- `R` — restore a session you killed
+- `↑`/`k`, `↓`/`j` — move between sessions; `1`–`9` jump to that row
 - `K`, `J` — reorder the selected session in the list
+- `]` — jump to the next session waiting for you
 
 ### Actions
 
 - `↵`/`o` — attach to the session
 - `ctrl-q` — detach
-- `p` — commit and push the branch
+- `i` — send the agent a prompt without attaching
+- `p` — commit and push the branch (needs `gh`)
 - `c` — checkout: commit, then pause the session and remove its worktree
 - `r` — resume a paused session
-- `g` — open the session's pull request in a browser
+- `g` — open the session's pull request in a browser (needs `gh`)
 - `u` — update: bring in the commits pushed to the branch since the worktree was
   created. Offered only on a row whose badge says there are some
+- `d` — run the [dev stack](#the-dev-stack) in this session's worktree; `x` stops it
 - `t` — change the colour theme
 - `?` — help
 
 ### Navigation
 
-- `tab` — cycle the Preview, Diff and Terminal tabs
-- `shift-↑`/`shift-↓` — scroll the active tab; `esc` leaves scroll mode
-- `q` — quit
+- `tab` — cycle the Preview, Diff, Terminal and Run tabs
+- `shift-↑`/`shift-↓`, `pgup`/`pgdn` — scroll the active tab; `esc` leaves scroll mode
+- `q` — quit; the sessions keep running
 
 ## Configuration
 
@@ -198,14 +204,14 @@ Adroit stores its configuration in `~/.adroit/config.json`, and its worktrees in
 A worktree is a checkout that nothing updates on its own, so a session opened to
 review a branch someone else is still pushing to quietly goes out of date. Adroit
 fetches each session's repository at most once a minute and marks the rows that
-have drifted: `↓3` for commits waiting on the remote, `⇅3/1` for a history that
+have drifted: `↓3` for commits waiting on the remote, `↑1 ↓3` for a history that
 has parted company with it (an upstream force-push, usually), and a dim `↑2` for
 commits of your own that are not pushed. `u` clears the first two — a
 fast-forward, or, for a divergence, a reset that discards the local commits after
 naming how many. Both ask first.
 
-It is the one feature that touches the network on a timer, so it can be switched
-off:
+It fetches on a timer, as the CI column does (`github_ci_status`), so on a metered
+or offline connection switch it off:
 
 ```json
 { "upstream_status": false }
@@ -243,7 +249,7 @@ overridden with a `colors` object in the config file.
 ### Profiles
 
 Profiles let you define named program configurations and pick between them when
-creating a session. With more than one defined, the creation overlay shows a
+creating a session with `N` (or `tab` at the name prompt; plain `n` uses the default). With more than one defined, the creation overlay shows a
 picker you navigate with `←`/`→`.
 
 ```json
@@ -271,6 +277,17 @@ creates a config — `claude` is often an install only a login shell can find �
 copying that file elsewhere leaves it pointing at a path that does not exist
 there. It repairs itself: an absolute program that is missing is looked up again
 by name, keeping any arguments after it.
+
+### Other settings
+
+| Field | Default | Effect |
+|-------|---------|--------|
+| `theme` | `"default"` | A built-in theme; `adroit theme` lists them, `adroit theme set <role> <colour>` overrides one colour |
+| `bell` | on | Ring the terminal bell when a session finishes its turn or stops on a question |
+| `notify_command` | none | Run through `sh -c` on the same events, with `ADROIT_SESSION` and `ADROIT_EVENT` (`finished` or `needs-input`) set — for a desktop notification |
+| `github_ci_status` | on | The CI and pull-request column; off also hides `g` |
+| `auto_yes` | off | Accept agent prompts automatically (experimental; same as `-y`) |
+| `daemon_poll_interval` | `1000` | How often, in ms, the auto-yes daemon checks sessions |
 
 ### Per-repository settings
 
@@ -379,13 +396,15 @@ or `kill` the pid in the message if that one is wedged.
 and contents. Logs go to `adroit.log` in the system temp directory
 (`/tmp/adroit.log` on Linux).
 
-**Start over** — `adroit reset` removes every stored session, its tmux session,
-its worktree **and its branch**. Push anything you want to keep first.
+**Start over** — `adroit reset` removes every stored session, its tmux session and
+its worktree. For the repository you run it in, it also deletes the branch each of
+those worktrees had checked out, **including branches that existed before Adroit**.
+Run it from inside a repository, and push anything you want to keep first.
 
 ## Uninstall
 
 ```bash
-adroit reset                      # sessions, tmux sessions, worktrees and their branches
+adroit reset                      # run inside a repo: sessions, tmux sessions, worktrees, branches
 rm ~/.local/bin/adroit ~/.local/bin/cs 2>/dev/null
 rm -rf ~/.adroit                  # config and state
 ```
