@@ -45,6 +45,7 @@ const (
 	KeySendPrompt    // Key for sending a prompt to a running session without attaching
 	KeyPageUp        // Key for scrolling the active pane up a page
 	KeyPageDown      // Key for scrolling the active pane down a page
+	KeySettings      // Key for opening agents, keys and workspace settings
 
 	// Diff keybindings
 	KeyShiftUp
@@ -84,6 +85,7 @@ var GlobalKeyStringsMap = map[string]KeyName{
 	"i":          KeySendPrompt,
 	"pgup":       KeyPageUp,
 	"pgdown":     KeyPageDown,
+	"s":          KeySettings,
 	"p":          KeySubmit,
 	"?":          KeyHelp,
 }
@@ -173,6 +175,10 @@ var GlobalkeyBindings = map[KeyName]key.Binding{
 	KeyUpdate: key.NewBinding(
 		key.WithKeys("u"),
 		key.WithHelp("u", "update"),
+	),
+	KeySettings: key.NewBinding(
+		key.WithKeys("s"),
+		key.WithHelp("s", "settings"),
 	),
 	KeyTheme: key.NewBinding(
 		key.WithKeys("t"),

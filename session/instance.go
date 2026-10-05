@@ -2,6 +2,7 @@ package session
 
 import (
 	"errors"
+	"github.com/AlexanderWeismannn/adroit/config"
 	"github.com/AlexanderWeismannn/adroit/log"
 	"github.com/AlexanderWeismannn/adroit/session/ci"
 	"github.com/AlexanderWeismannn/adroit/session/git"
@@ -523,8 +524,29 @@ func (i *Instance) Start(firstTimeSetup bool) error {
 // resume starts a session too, and resume is the case the whole mechanism
 // exists for.
 func (i *Instance) startTmux(dir string) error {
-	i.tmuxSession.SetLaunchCommand(i.launchCommandFor(dir))
+	i.tmuxSession.SetLaunchCommand(withAgentKeys(i.launchCommandFor(dir), i.Program, config.PeekConfig()))
 	return i.tmuxSession.Start(dir)
+}
+
+// withAgentKeys routes a launch through `adroit agent-run` when the session's
+// profile has API keys, so they reach the agent's environment from the secrets
+// store without ever being written into the tmux command line.
+func withAgentKeys(command, program string, cfg *config.Config) string {
+	p := cfg.ProfileForProgram(program)
+	if p == nil || len(p.Keys) == 0 {
+		return command
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		log.WarningLog.Printf("cannot find this binary to load %s's keys: %v", p.Name, err)
+		return command
+	}
+	return fmt.Sprintf("%s agent-run --profile %s -- %s", shellWord(exe), shellWord(p.Name), shellWord(command))
+}
+
+// shellWord quotes s as one word for sh.
+func shellWord(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'"'"'`) + "'"
 }
 
 // launchCommandFor is the command line to start the program in dir with, and

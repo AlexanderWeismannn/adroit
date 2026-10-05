@@ -82,7 +82,7 @@ type Menu struct {
 // Restore sits with the actions in the empty state on purpose: killing the last
 // session is exactly when it is wanted, and that is the one moment when no row
 // is there to carry the key.
-var defaultMenuOptions = []keys.KeyName{keys.KeyNew, keys.KeyPrompt, keys.KeyRestore, keys.KeyTheme, keys.KeyHelp, keys.KeyQuit}
+var defaultMenuOptions = []keys.KeyName{keys.KeyNew, keys.KeyPrompt, keys.KeyRestore, keys.KeySettings, keys.KeyTheme, keys.KeyHelp, keys.KeyQuit}
 
 // Both overlay menus used to advertise nothing but "enter submit name", which on
 // the prompt overlay is not even true -- enter submits only from the button, and
@@ -221,7 +221,7 @@ func (m *Menu) setOptions(options []keys.KeyName, groups []menuGroup, actionGrou
 func (m *Menu) addInstanceOptions() {
 	// Loading instances only get minimal options
 	if m.instance != nil && m.instance.Status == session.Loading {
-		m.setOptions([]keys.KeyName{keys.KeyNew, keys.KeyTheme, keys.KeyHelp, keys.KeyQuit},
+		m.setOptions([]keys.KeyName{keys.KeyNew, keys.KeySettings, keys.KeyTheme, keys.KeyHelp, keys.KeyQuit},
 			[]menuGroup{{0, 1}, {1, 4}}, -1)
 		return
 	}
@@ -307,7 +307,7 @@ func (m *Menu) addInstanceOptions() {
 	}
 
 	// System group
-	systemGroup := []keys.KeyName{keys.KeyTab, keys.KeyTheme, keys.KeyHelp, keys.KeyQuit}
+	systemGroup := []keys.KeyName{keys.KeyTab, keys.KeySettings, keys.KeyTheme, keys.KeyHelp, keys.KeyQuit}
 
 	actionStart := len(options)
 	options = append(options, actionGroup...)

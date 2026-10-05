@@ -32,6 +32,80 @@ func GetConfigDir() (string, error) {
 type Profile struct {
 	Name    string `json:"name"`
 	Program string `json:"program"`
+	// Keys lists the environment variables this agent reads its API key from,
+	// e.g. OPENAI_API_KEY. Their values live in the secrets store, never here;
+	// a session started with this profile gets them in its environment.
+	Keys []string `json:"keys,omitempty"`
+}
+
+// ProgramFor is the program a new session in repoPath runs: the repository's
+// own agent profile when it names one that exists, else the global default.
+func (c *Config) ProgramFor(repoPath string) string {
+	if e := c.repoEntry(repoPath); e != nil && e.Agent != "" {
+		for _, p := range c.Profiles {
+			if p.Name == e.Agent {
+				return rehomeProgram(p.Program)
+			}
+		}
+	}
+	return c.GetProgram()
+}
+
+// AgentPreset is a known agent CLI: what to run, which keys it reads, how to
+// install it, and a one-shot command that proves a key works.
+type AgentPreset struct {
+	Name    string
+	Program string
+	Keys    []string
+	Install string
+	// Check runs the agent once, non-interactively, with a trivial prompt.
+	Check string
+}
+
+// AgentPresets are the agents the settings screen offers to add.
+var AgentPresets = []AgentPreset{
+	{Name: "claude", Program: "claude", Keys: []string{"ANTHROPIC_API_KEY"},
+		Install: "curl -fsSL https://claude.ai/install.sh | bash",
+		Check:   `claude -p "Reply with the single word OK"`},
+	{Name: "codex", Program: "codex", Keys: []string{"OPENAI_API_KEY"},
+		Install: "npm install -g @openai/codex",
+		Check:   `codex exec "Reply with the single word OK"`},
+	{Name: "gemini", Program: "gemini", Keys: []string{"GEMINI_API_KEY"},
+		Install: "npm install -g @google/gemini-cli",
+		Check:   `gemini -p "Reply with the single word OK"`},
+	{Name: "aider", Program: "aider", Keys: []string{"OPENAI_API_KEY", "ANTHROPIC_API_KEY"},
+		Install: "python -m pip install aider-install && aider-install",
+		Check:   `aider --message "Reply with the single word OK" --yes --no-git --no-auto-commits`},
+}
+
+// PresetFor returns the preset whose program a profile runs, if any.
+func PresetFor(program string) *AgentPreset {
+	fields := strings.Fields(program)
+	if len(fields) == 0 {
+		return nil
+	}
+	base := filepath.Base(fields[0])
+	for i := range AgentPresets {
+		if AgentPresets[i].Program == base {
+			return &AgentPresets[i]
+		}
+	}
+	return nil
+}
+
+// ProfileForProgram is the profile a session running program was started
+// from: the one with exactly that program, else the default profile when the
+// program is the default program.
+func (c *Config) ProfileForProgram(program string) *Profile {
+	if c == nil {
+		return nil
+	}
+	for i := range c.Profiles {
+		if c.Profiles[i].Program == program {
+			return &c.Profiles[i]
+		}
+	}
+	return nil
 }
 
 // Config represents the application configuration
@@ -118,6 +192,9 @@ type RepoConfig struct {
 	PreserveBranchCase *bool `json:"preserve_branch_case,omitempty"`
 	// Dev is the development stack that runs this repository.
 	Dev *DevConfig `json:"dev,omitempty"`
+	// Agent names the profile new sessions in this repository start with,
+	// instead of the global default.
+	Agent string `json:"agent,omitempty"`
 }
 
 // DevConfig describes a long-running development stack -- servers, watchers, a
@@ -518,7 +595,26 @@ func saveConfig(config *Config) error {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
 
-	return os.WriteFile(configPath, data, 0644)
+	// Atomically: the settings screen writes this while Adroit runs, and a
+	// crash half way through a plain write would leave a file that no longer
+	// parses -- which falls back to defaults and loses every setting.
+	tmp, err := os.CreateTemp(configDir, ".config-*.json")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(0644); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), configPath)
 }
 
 // SaveConfig exports the saveConfig function for use by other packages

@@ -185,6 +185,7 @@ The menu at the bottom of the screen shows what is available in the current cont
 - `u` — update: bring in the commits pushed to the branch since the worktree was
   created. Offered only on a row whose badge says there are some
 - `d` — run the [dev stack](#the-dev-stack) in this session's worktree; `x` stops it
+- `s` — settings: agents and their API keys, workspaces, options
 - `t` — change the colour theme
 - `?` — help
 
@@ -198,6 +199,39 @@ The menu at the bottom of the screen shows what is available in the current cont
 
 Adroit stores its configuration in `~/.adroit/config.json`, and its worktrees in
 `~/.adroit/worktrees`. Find the exact paths with `adroit debug`.
+
+### Settings, agents and API keys
+
+`s` opens the settings screen, so most of this file never needs editing by hand.
+
+- **Agents** — add Claude Code, Codex (OpenAI), Gemini or Aider, or any command of your
+  own; pick the default with `d`. `s` stores an agent's API key (`OPENAI_API_KEY`,
+  `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`), and `t` runs the agent once to check the key
+  works.
+- **Workspaces** — per repository: the branch prefix, whether branch names keep their
+  case, which agent new sessions start with, and the dev-stack command.
+- **General** — the bell, a notify command, the CI and drift columns, base-branch sync,
+  auto-yes and the global branch prefix.
+
+Keys never go into `config.json`. They are kept in the macOS Keychain, in the Linux
+Secret Service keyring (GNOME Keyring, KWallet) when one is running, and otherwise in
+`~/.adroit/secrets.env`, which only you can read. A session whose agent has a key is
+started through `adroit agent-run`, which puts the key in that agent's environment;
+it never appears in a command line. A key you export in your shell still works, but
+one stored here takes precedence.
+
+**Using OpenAI:** press `s`, `a`, choose **codex**, press `s` and paste your key, then
+`t` to check it. Install the CLI first with `npm install -g @openai/codex`. Pick codex
+per session with `N`, make it the default with `d`, or set it for one repository under
+Workspaces.
+
+In the file, a profile lists the variables its agent reads; the values live in the
+store:
+
+```json
+{ "profiles": [ { "name": "codex", "program": "codex", "keys": ["OPENAI_API_KEY"] } ],
+  "repos": { "~/work/api": { "agent": "codex" } } }
+```
 
 ### Upstream tracking
 
@@ -319,6 +353,7 @@ to the top-level value:
 | `branch_prefix`        | The prefix on branches cut in this repository    |
 | `preserve_branch_case` | The case policy for those branch names           |
 | `dev`                  | The development stack that runs this repository  |
+| `agent`                | The profile new sessions here start with         |
 
 `"branch_prefix": ""` means *no prefix here*, which is different from leaving the
 key out (inherit the global one). A ticket convention is a property of the

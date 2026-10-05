@@ -481,3 +481,24 @@ func TestPeekConfigNeverWritesAConfig(t *testing.T) {
 		t.Fatalf("LoadConfig should still write the defaults on first run: %v", err)
 	}
 }
+
+// A repository's own agent decides what its new sessions run; a name that is
+// not a profile, or no entry, falls back to the global default.
+func TestProgramForUsesTheRepositorysAgent(t *testing.T) {
+	cfg := &Config{
+		DefaultProgram: "claude",
+		Profiles:       []Profile{{Name: "claude", Program: "claude"}, {Name: "codex", Program: "codex --full-auto"}},
+		Repos: map[string]*RepoConfig{
+			"/work/api":  {Agent: "codex"},
+			"/work/web":  {Agent: "gone"},
+			"/work/docs": {},
+		},
+	}
+	for repo, want := range map[string]string{
+		"/work/api": "codex --full-auto", "/work/web": "claude", "/work/docs": "claude", "/elsewhere": "claude",
+	} {
+		if got := cfg.ProgramFor(repo); got != want {
+			t.Errorf("ProgramFor(%q) = %q, want %q", repo, got, want)
+		}
+	}
+}
