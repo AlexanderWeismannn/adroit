@@ -549,6 +549,10 @@ func TestTitleCollisionComparesTmuxNames(t *testing.T) {
 	err := titleCollision(mk("docs"), existing)
 	require.ErrorContains(t, err, "already exists")
 
+	// Nor may a name land on another session's Terminal-tab session.
+	require.ErrorContains(t, titleCollision(mk("term_docs"), existing), "Terminal tab")
+	require.ErrorContains(t, titleCollision(mk("x"), append(existing, mk("term_x"))), "Terminal tab")
+
 	// The row being named is in the list too, and must not collide with itself.
 	self := mk("docs-2")
 	require.NoError(t, titleCollision(self, append(existing, self)))
@@ -1032,6 +1036,14 @@ func TestReapingNeverTouchesAnAgentSession(t *testing.T) {
 	fake := &fakeTmuxExec{sessions: []string{"adroit_TASK-5719-gone", "adroit_dev", "main"}}
 	reapOrphanedTerminalsWith(fake, nil)
 	require.Empty(t, fake.killed)
+
+	// An agent whose title starts "term_" has the terminals' prefix. It is still
+	// an agent, not an orphaned terminal.
+	inst, err := session.NewInstance(session.InstanceOptions{Title: "term_sheet", Path: ".", Program: "echo"})
+	require.NoError(t, err)
+	fake = &fakeTmuxExec{sessions: []string{"adroit_term_sheet"}}
+	reapOrphanedTerminalsWith(fake, []*session.Instance{inst})
+	require.Empty(t, fake.killed, "the agent of a session titled term_sheet was reaped")
 }
 
 // The tick's whole cost is what it decides to spend here, so the plan is worth

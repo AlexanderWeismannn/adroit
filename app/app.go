@@ -191,6 +191,10 @@ func reapOrphanedTerminalsWith(exec cmd.Executor, instances []*session.Instance)
 	live := make(map[string]bool, len(instances))
 	for _, instance := range instances {
 		live[tmux.SessionNameFor(ui.TerminalSessionName(instance.Title))] = true
+		// A session titled "term_x" runs its agent in adroit_term_x, which has
+		// the terminals' prefix. It is never an orphaned terminal: reaping it
+		// killed that agent on every launch.
+		live[tmux.SessionNameFor(instance.Title)] = true
 	}
 
 	prefix := tmux.SessionNameFor(ui.TerminalSessionName(""))
@@ -2116,9 +2120,17 @@ func titleForRepo(path string, existing []*session.Instance) string {
 // one session attach to the same agent, and killing either kills both.
 func titleCollision(inst *session.Instance, existing []*session.Instance) error {
 	want := tmux.SessionNameFor(inst.Title)
+	wantTerm := tmux.SessionNameFor(ui.TerminalSessionName(inst.Title))
 	for _, other := range existing {
 		if other == inst || other.Title == "" {
 			continue
+		}
+		// Each session also owns a Terminal-tab session, "term_" + its title, so
+		// "term_x" beside "x" would put one row's agent in the other's terminal.
+		if want == tmux.SessionNameFor(ui.TerminalSessionName(other.Title)) ||
+			wantTerm == tmux.SessionNameFor(other.Title) {
+			return fmt.Errorf("%q clashes with the session %q: one's agent would share the other's Terminal tab",
+				inst.Title, other.Title)
 		}
 		if tmux.SessionNameFor(other.Title) == want {
 			if other.Title == inst.Title {
