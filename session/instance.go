@@ -493,7 +493,7 @@ func (i *Instance) Start(firstTimeSetup bool) error {
 		// now: the next line starts it, and from then on it is the program's
 		// directory, not ours.
 		if err := i.prepareWorkspace(i.gitWorktree.GetWorktreePath()); err != nil {
-			if cleanupErr := i.gitWorktree.Cleanup(); cleanupErr != nil {
+			if cleanupErr := i.gitWorktree.AbandonSetup(); cleanupErr != nil {
 				err = fmt.Errorf("%v (cleanup error: %v)", err, cleanupErr)
 			}
 			setupErr = err
@@ -503,7 +503,7 @@ func (i *Instance) Start(firstTimeSetup bool) error {
 		// Create new session
 		if err := i.startTmux(i.gitWorktree.GetWorktreePath()); err != nil {
 			// Cleanup git worktree if tmux session creation fails
-			if cleanupErr := i.gitWorktree.Cleanup(); cleanupErr != nil {
+			if cleanupErr := i.gitWorktree.AbandonSetup(); cleanupErr != nil {
 				err = fmt.Errorf("%v (cleanup error: %v)", err, cleanupErr)
 			}
 			setupErr = fmt.Errorf("failed to start new session: %w", err)

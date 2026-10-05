@@ -140,6 +140,7 @@ func (g *GitWorktree) setupFromExistingBranch() error {
 			log.InfoLog.Printf("branch %s is already checked out at %s; adopting that worktree",
 				g.branchName, held)
 			g.worktreePath = held
+			g.adopted = true
 			return g.recordBaseCommit()
 		}
 		// Registered but gone from disk: drop the registration so the add below works.
@@ -247,6 +248,19 @@ func (g *GitWorktree) setupNewWorktree() error {
 }
 
 // Cleanup removes the worktree and associated branch
+// AbandonSetup undoes a Setup whose session then failed to start.
+//
+// It is Cleanup for a worktree this Setup created. For one it adopted it does
+// nothing: Cleanup runs `worktree remove -f`, which would throw away work that
+// was sitting in that directory before this session ever existed -- the very
+// work adoption exists to keep.
+func (g *GitWorktree) AbandonSetup() error {
+	if g.adopted {
+		return nil
+	}
+	return g.Cleanup()
+}
+
 func (g *GitWorktree) Cleanup() error {
 	var errs []error
 

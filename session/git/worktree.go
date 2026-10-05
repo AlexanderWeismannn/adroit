@@ -49,6 +49,10 @@ type GitWorktree struct {
 	// isExistingBranch is true if the branch existed before the session was created.
 	// When true, the branch will not be deleted on cleanup.
 	isExistingBranch bool
+	// adopted is true when Setup took over a worktree that was already holding
+	// the branch instead of creating one. That directory, and whatever is
+	// uncommitted in it, predates this session.
+	adopted bool
 }
 
 func NewGitWorktreeFromStorage(repoPath string, worktreePath string, sessionName string, branchName string, baseCommitSHA string, baseBranch string, isExistingBranch bool) *GitWorktree {
