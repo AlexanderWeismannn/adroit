@@ -97,7 +97,7 @@ func runDoctor(w io.Writer, program string) (failed int) {
 		{
 			name:  "gh",
 			level: levelOptional,
-			why:   "CI status, pull-request state and `g` need it",
+			why:   "`p` (push), `g` and the CI and pull-request columns need it",
 			run: func() (string, bool) {
 				if _, err := exec.LookPath("gh"); err != nil {
 					return "not installed", false

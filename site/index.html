@@ -124,7 +124,7 @@ footer { color: var(--muted); font-size: 13px; display: flex; justify-content: s
     <div>
       <h1>adroit</h1>
       <p>Run Claude Code, Codex, Gemini or Aider side by side. Each session gets its own git worktree and tmux session, so agents never edit the same checkout.</p>
-      <p class="muted">Linux, macOS and WSL. Needs git and tmux.</p>
+      <p class="muted">Linux, macOS and WSL. Needs git, tmux and an agent (Claude Code by default).</p>
     </div>
   </section>
 
@@ -159,7 +159,7 @@ footer { color: var(--muted); font-size: 13px; display: flex; justify-content: s
     <div class="tabs"><span class="sep">─</span><span class="pill">Instances · 5</span><span class="sep">─</span></div>
     <div class="rows">
       <div class="row"><span class="n">1.</span><span class="t">parallel sessions</span><span class="s fr" id="spin" aria-hidden="true">⠹</span><span class="d">A branch, a worktree and a tmux session per task. Your main checkout stays untouched.</span></div>
-      <div class="row"><span class="n">2.</span><span class="t">review before you push</span><span class="s"><span class="ok">+6</span> <span class="bad">-4</span></span><span class="d">Preview, Diff and Terminal tabs per session. Commit and push, or check the branch out.</span></div>
+      <div class="row"><span class="n">2.</span><span class="t">review before you push</span><span class="s"><span class="ok">+6</span> <span class="bad">-4</span></span><span class="d">Preview, Diff, Terminal and Run tabs per session. Commit and push, or check the branch out.</span></div>
       <div class="row"><span class="n">3.</span><span class="t">status at a glance</span><span class="s ok">✓ done</span><span class="d">Each row shows whether its agent is working, waiting for you or finished, plus CI and PR state from gh.</span></div>
       <div class="row"><span class="n">4.</span><span class="t">any agent</span><span class="s ok">●</span><span class="d">Claude Code by default. Add profiles for Codex, Gemini or Aider and pick one per session.</span></div>
       <div class="row"><span class="n">5.</span><span class="t">dev stack and themes</span><span class="s muted">t</span><span class="d"><span class="fr">d</span> runs your servers in the selected worktree. <span class="fr">t</span> picks one of eight themes, previewed live.</span></div>

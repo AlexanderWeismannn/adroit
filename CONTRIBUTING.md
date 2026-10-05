@@ -13,7 +13,8 @@ go test ./...
 ```
 
 Run your build against a scratch repository rather than one you care about:
-sessions create real worktrees and branches. Logs go to `/tmp/adroit.log`.
+sessions create real worktrees and branches. Logs go to `adroit.log` in the system temp directory (`/tmp` on Linux,
+`$TMPDIR` on macOS).
 
 If you run the tests from inside tmux (or inside Adroit itself), clear `TMUX`
 so the tmux tests start their own server: `env -u TMUX go test ./...`.
