@@ -3,6 +3,7 @@ package session
 import (
 	"fmt"
 	"github.com/AlexanderWeismannn/adroit/cmd/cmd_test"
+	"github.com/AlexanderWeismannn/adroit/config"
 	"github.com/AlexanderWeismannn/adroit/log"
 	"github.com/AlexanderWeismannn/adroit/session/git"
 	"github.com/AlexanderWeismannn/adroit/session/resume"
@@ -528,4 +529,19 @@ func TestAFailedResumeKeepsTheBranchAndTheWorktree(t *testing.T) {
 	require.Equal(t, Paused, instance.Status)
 	require.Equal(t, "the agent's work", run(repo, "log", "-1", "--format=%s", "agent-work"), "the branch must survive")
 	require.DirExists(t, worktree, "the worktree must survive")
+}
+
+// The tmux command line is visible to every process on the machine, so a key
+// must never be in it: the launch names the profile and lets agent-run fetch it.
+func TestLaunchWithKeysNamesTheProfileNotTheKey(t *testing.T) {
+	cfg := &config.Config{Profiles: []config.Profile{
+		{Name: "codex", Program: "codex --full-auto", Keys: []string{"OPENAI_API_KEY"}},
+		{Name: "claude", Program: "claude"},
+	}}
+	got := withAgentKeys("codex --full-auto 'it''s'", "codex --full-auto", cfg)
+	require.Contains(t, got, " agent-run --profile 'codex' -- ")
+	require.NotContains(t, got, "sk-")
+
+	require.Equal(t, "claude", withAgentKeys("claude", "claude", cfg), "a profile with no keys launches as before")
+	require.Equal(t, "aider", withAgentKeys("aider", "aider", cfg), "no profile, no wrapper")
 }
