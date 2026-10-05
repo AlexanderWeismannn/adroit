@@ -1,0 +1,6 @@
+.idea
+.aider*
+/adroit
+/cs
+/dist/
+**.DS_Store
