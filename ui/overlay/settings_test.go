@@ -9,6 +9,7 @@ import (
 	"github.com/AlexanderWeismannn/adroit/secrets"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/stretchr/testify/require"
 )
 
@@ -151,5 +152,22 @@ func TestSettingsKeepsALongValueOnOneLine(t *testing.T) {
 		if strings.Contains(line, "npm run dev") {
 			require.Contains(t, line, "dev command", "the command spilled onto a line of its own")
 		}
+	}
+}
+
+// The box is one size whatever it shows: switching tabs or opening a prompt
+// used to grow and shrink it under the cursor.
+func TestSettingsIsTheSameSizeOnEveryTab(t *testing.T) {
+	s, _, _ := newTestSettings(t)
+	dims := func() (int, int) {
+		view := s.Render()
+		return lipgloss.Height(view), lipgloss.Width(view)
+	}
+	h, w := dims()
+	for _, step := range [][]string{{"tab"}, {"tab"}, {"tab"}, {"a"}, {"esc"}, {"s"}} {
+		press(s, step...)
+		gh, gw := dims()
+		require.Equal(t, h, gh, "height changed after %v", step)
+		require.Equal(t, w, gw, "width changed after %v", step)
 	}
 }

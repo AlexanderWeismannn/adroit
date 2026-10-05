@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/reflow/truncate"
 )
 
 // Settings is the in-app editor for what used to need a hand-edited
@@ -546,7 +547,12 @@ func (s *Settings) generalFields() []settingsField {
 		toggle("sync base branch", "sync_base_branch", syncGet, syncSet, "fast-forwards main before cutting a session"),
 		toggle("auto-yes", "auto_yes", func() bool { return s.cfg.AutoYes }, func(v bool) { s.cfg.AutoYes = v },
 			"experimental; applies from the next launch"),
-		{label: "branch prefix", value: func() string { return s.cfg.BranchPrefix }, edit: func() {
+		{label: "branch prefix", value: func() string {
+			if s.cfg.BranchPrefix == "" {
+				return "(none)"
+			}
+			return s.cfg.BranchPrefix
+		}, edit: func() {
 			s.ask("Prefix for new branches (per-repository ones win)", s.cfg.BranchPrefix, false, func(v string) {
 				s.cfg.BranchPrefix = strings.TrimSpace(v)
 				s.commit(map[string]any{"branch_prefix": s.cfg.BranchPrefix}, "saved the branch prefix")
@@ -667,6 +673,8 @@ func (s *Settings) Render() string {
 	bad := lipgloss.NewStyle().Foreground(theme.Color(theme.Danger))
 	sel := lipgloss.NewStyle().Background(theme.Color(theme.SelectionBg)).Foreground(theme.Color(theme.SelectionFg))
 
+	// One size for every tab and every mode: the box used to grow and shrink
+	// with its content as you moved between tabs.
 	width := s.width - 8
 	if width > 100 {
 		width = 100
@@ -674,6 +682,7 @@ func (s *Settings) Render() string {
 	if width < 50 {
 		width = 50
 	}
+	inner := width - 6 // border and padding
 
 	var b strings.Builder
 	// The tab bar, drawn like the main window's.
@@ -688,9 +697,12 @@ func (s *Settings) Render() string {
 	b.WriteString(accent.Render("Settings  ") + strings.Join(tabs, subtle.Render("─┬─")))
 	b.WriteString("\n\n")
 
-	row := func(i int, line string) {
+	// row draws one line. The selected one is drawn from its plain text, so the
+	// highlight runs the full width: styled pieces inside it reset the
+	// background and cut the bar off after the first of them.
+	row := func(i int, line, plain string) {
 		if i == s.cursor[s.tab] && s.mode == modeBrowse {
-			b.WriteString(sel.Render("▸ " + padTo(line, width-4)))
+			b.WriteString(sel.Render("▸ " + padTo(plain, inner-2)))
 		} else {
 			b.WriteString("  " + line)
 		}
@@ -705,17 +717,24 @@ func (s *Settings) Render() string {
 			if s.cfg.DefaultProgram == p.Name || (s.cfg.DefaultProgram == p.Program && i == 0) {
 				def = ok.Render("● ")
 			}
-			keyCol := s.keyStatus(p, ok, bad, muted)
+			keyCol, keyPlain := s.keyStatus(p, ok, muted)
 			if c, found := s.checks[p.Name]; found {
 				if strings.HasPrefix(c, "✓") {
 					keyCol += "  " + ok.Render(c)
 				} else {
 					keyCol += "  " + bad.Render(clipText(c, 40))
 				}
+				keyPlain += "  " + clipText(c, 40)
 			}
-			row(i, fmt.Sprintf("%s %-10s %-24s %s", def, clipText(p.Name, 10), clipText(p.Program, 24), keyCol))
+			defPlain := "  "
+			if def != "  " {
+				defPlain = "● "
+			}
+			name, prog := clipText(p.Name, 10), clipText(p.Program, 24)
+			row(i, fmt.Sprintf("%s %-10s %-24s %s", def, name, prog, keyCol),
+				fmt.Sprintf("%s %-10s %-24s %s", defPlain, name, prog, keyPlain))
 		}
-		row(len(s.cfg.Profiles), accent.Render("+ add an agent"))
+		row(len(s.cfg.Profiles), accent.Render("+ add an agent"), "+ add an agent")
 		b.WriteString("\n" + muted.Render("keys go to "+s.store.Backend()+", never config.json") + "\n")
 	case tabWorkspaces:
 		if s.repo == "" {
@@ -724,14 +743,19 @@ func (s *Settings) Render() string {
 				if r == s.repoPath {
 					label += muted.Render("  (this repository)")
 				}
-				row(i, label)
+				plain := shortPath(r)
+				if r == s.repoPath {
+					plain += "  (this repository)"
+				}
+				row(i, label, plain)
 			}
 		} else {
 			b.WriteString(text.Render(shortPath(s.repo)) + "\n\n")
 			for i, f := range s.workspaceFields(s.repo) {
 				// One line each: a dev command is often longer than the box, and
 				// wrapping it pushed every other field out of view.
-				row(i, fmt.Sprintf("%-18s %s", f.label, clipText(f.value(), width-28)))
+				line := fmt.Sprintf("%-18s %s", f.label, clipText(f.value(), inner-24))
+				row(i, line, line)
 			}
 			if f := s.workspaceFields(s.repo); s.cursor[tabWorkspaces] < len(f) && f[s.cursor[tabWorkspaces]].hint != "" {
 				b.WriteString("\n" + muted.Render(f[s.cursor[tabWorkspaces]].hint) + "\n")
@@ -740,7 +764,8 @@ func (s *Settings) Render() string {
 	case tabGeneral:
 		fields := s.generalFields()
 		for i, f := range fields {
-			row(i, fmt.Sprintf("%-22s %s", f.label, clipText(f.value(), width-32)))
+			line := fmt.Sprintf("%-22s %s", f.label, clipText(f.value(), inner-28))
+			row(i, line, line)
 		}
 		if i := s.cursor[tabGeneral]; i < len(fields) && fields[i].hint != "" {
 			b.WriteString("\n" + muted.Render(fields[i].hint) + "\n")
@@ -773,13 +798,39 @@ func (s *Settings) Render() string {
 	}
 
 	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(theme.Color(theme.Accent)).
-		Padding(1, 2).Width(width).Render(b.String())
+		Padding(1, 2).Render(fitBox(b.String(), inner, settingsBodyLines))
+}
+
+// settingsBodyLines is the box's fixed height in lines of content: enough for
+// a handful of agents with a picker open beneath them, so switching tabs or
+// opening a prompt does not resize it.
+const settingsBodyLines = 16
+
+// fitBox makes every line exactly width cells -- clipped, or padded -- and the
+// block at least height lines, the help line kept at the bottom. Done here
+// rather than with lipgloss's Width, which wraps and drops trailing spaces,
+// which is what cut the selection bar short.
+func fitBox(content string, width, height int) string {
+	lines := strings.Split(strings.TrimRight(content, "\n"), "\n")
+	if len(lines) < height {
+		help := lines[len(lines)-1]
+		lines = append(lines[:len(lines)-1], make([]string, height-len(lines))...)
+		lines = append(lines, help)
+	}
+	for i, l := range lines {
+		if w := lipgloss.Width(l); w > width {
+			lines[i] = truncate.String(l, uint(width))
+		} else if w < width {
+			lines[i] = l + strings.Repeat(" ", width-w)
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (s *Settings) help() string {
 	switch s.tab {
 	case tabAgents:
-		return "↑↓ move · s set key · t test key · d make default · a add · enter edit command · x remove · tab next · esc close"
+		return "↑↓ move · s key · t test · d default · a add · enter edit · x remove · tab next · esc close"
 	case tabWorkspaces:
 		if s.repo == "" {
 			return "↑↓ move · enter open · tab next · esc close"
@@ -789,20 +840,24 @@ func (s *Settings) help() string {
 	return "↑↓ move · enter change · tab next · esc close"
 }
 
-func (s *Settings) keyStatus(p config.Profile, ok, bad, muted lipgloss.Style) string {
+// keyStatus is the API key column, styled and plain.
+func (s *Settings) keyStatus(p config.Profile, ok, muted lipgloss.Style) (string, string) {
 	if len(p.Keys) == 0 {
-		return muted.Render("none needed (s to add one)")
+		const none = "none needed (s to add one)"
+		return muted.Render(none), none
 	}
-	var parts []string
+	var styled, plain []string
 	for _, k := range p.Keys {
 		v, err := s.store.Get(secrets.Key(p.Name, k))
 		if err == nil && v != "" {
-			parts = append(parts, ok.Render(secrets.Mask(v)))
+			styled = append(styled, ok.Render(secrets.Mask(v)))
+			plain = append(plain, secrets.Mask(v))
 		} else {
-			parts = append(parts, muted.Render(k+" not set"))
+			styled = append(styled, muted.Render(k+" not set"))
+			plain = append(plain, k+" not set")
 		}
 	}
-	return strings.Join(parts, " ")
+	return strings.Join(styled, " "), strings.Join(plain, " ")
 }
 
 func padTo(s string, w int) string {
