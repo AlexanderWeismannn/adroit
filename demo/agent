@@ -1,0 +1,157 @@
+#!/usr/bin/env python3
+# A scripted stand-in for an agent, so the demo recording is repeatable. It draws
+# the same status lines Adroit reads off Claude Code (working / worked for), and
+# makes real edits in its worktree so the Diff tab has something true to show.
+import os, sys, time, re, termios, tty
+
+DIM, BOLD, RST = "\x1b[2m", "\x1b[1m", "\x1b[0m"
+CY, GR, RD, YL, MG = "\x1b[36m", "\x1b[32m", "\x1b[31m", "\x1b[33m", "\x1b[35m"
+W = lambda s: (sys.stdout.write(s), sys.stdout.flush())
+
+def cols():
+    try: return os.get_terminal_size().columns
+    except OSError: return 80
+
+RULE = 64
+
+def box():
+    W(f"{DIM}{'─'*RULE}{RST}\n{BOLD}>{RST} ")
+
+def close_box():
+    W(f"\n{DIM}{'─'*RULE}{RST}\n")
+
+def read_line():
+    fd = sys.stdin.fileno(); buf = ""
+    while True:
+        ch = os.read(fd, 1).decode(errors="ignore")
+        if ch in ("\r", "\n"):
+            if buf.strip(): return buf
+            continue
+        if ch in ("\x7f", "\b"):
+            if buf: buf = buf[:-1]; W("\b \b")
+            continue
+        if ch.isprintable(): buf += ch; W(ch)
+
+def work(steps, verb):
+    t0 = time.time()
+    for kind, text, secs, action in steps:
+        end = time.time() + secs
+        while time.time() < end:
+            el = int(time.time() - t0) + 1
+            W(f"\r\x1b[2K{MG}✻{RST} {verb}… {DIM}({el}s · esc to interrupt){RST}")
+            time.sleep(0.25)
+        W("\r\x1b[2K")
+        if action: action()
+        if kind == "tool": W(f"{GR}●{RST} {BOLD}{text[0]}{RST}({text[1]})\n")
+        elif kind == "out": W(f"  {DIM}⎿  {text}{RST}\n")
+        elif kind == "bad": W(f"  {DIM}⎿{RST}  {RD}{text}{RST}\n")
+        elif kind == "ok": W(f"  {DIM}⎿{RST}  {GR}{text}{RST}\n")
+        elif kind == "more": W(f"  {text}\n")
+        else: W(f"{GR}●{RST} {text}\n")
+    W(f"{MG}✻{RST} {DIM}Worked for {int(time.time()-t0)}s{RST}\n\n")
+
+def edit(path, old, new):
+    def f():
+        s = open(path).read(); open(path, "w").write(s.replace(old, new))
+    return f
+
+def write(path, body):
+    def f():
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True); open(path, "w").write(body)
+    return f
+
+REFRESH_NEW = '''func (c *Client) Do(req *Request) (*Response, error) {
+	// Refresh before sending: a token that expires mid-request fails once.
+	if c.token.ExpiresWithin(30 * time.Second) {
+		if err := c.refresh(req.Context()); err != nil {
+			return nil, fmt.Errorf("refresh token: %w", err)
+		}
+	}
+	return c.send(req)
+}'''
+REFRESH_OLD = '''func (c *Client) Do(req *Request) (*Response, error) {
+	resp, err := c.send(req)
+	if isExpired(c.token) {
+		c.refresh()
+	}
+	return resp, err
+}'''
+RETRY_NEW = '''package billing
+
+import "time"
+
+// Charge retries a failed payment with backoff: 1s, 2s, 4s, then gives up.
+func Charge(p Payment) error {
+	var err error
+	for attempt, wait := 0, time.Second; attempt < 4; attempt, wait = attempt+1, wait*2 {
+		if err = gateway.Charge(p); err == nil || !retryable(err) {
+			return err
+		}
+		time.Sleep(wait)
+	}
+	return err
+}
+'''
+
+def plan(name):
+    if "auth" in name:
+        return "Refactoring", [
+            ("tool", ("Read", "auth/refresh.go"), 1.2, None),
+            ("out", "Read 18 lines", 0.4, None),
+            ("say", "The token is refreshed after the request is sent, so a request", 1.4, None),
+            ("more", "that crosses the expiry fails once. Moving the check first.", 0.3, None),
+            ("tool", ("Update", "auth/refresh.go"), 1.6, edit("auth/refresh.go", REFRESH_OLD, REFRESH_NEW)),
+            ("out", "Updated with 7 additions and 5 removals", 0.4, None),
+            ("tool", ("Bash", "go test ./auth/..."), 2.2, None),
+            ("ok", "ok   example.com/api/auth   0.412s", 0.4, None),
+            ("say", "Done. Requests now refresh the token before they are sent.", 0.6, None),
+        ]
+    if "billing" in name:
+        return "Retrying", [
+            ("tool", ("Read", "billing/retry.go"), 1.0, None),
+            ("out", "Read 6 lines", 0.4, None),
+            ("tool", ("Write", "billing/retry.go"), 2.0, write("billing/retry.go", RETRY_NEW)),
+            ("out", "Wrote 15 lines", 0.4, None),
+            ("tool", ("Bash", "go test ./billing/..."), 2.4, None),
+            ("bad", "FAIL TestChargeGivesUp: want 4 attempts, got 5", 0.6, None),
+            ("say", "Off by one in the loop bound. Fixing.", 1.6, edit("billing/retry.go", "attempt < 4", "attempt < 3")),
+            ("tool", ("Bash", "go test ./billing/..."), 2.0, None),
+            ("ok", "ok   example.com/api/billing   1.102s", 0.4, None),
+        ]
+    return "Writing", [
+        ("tool", ("Read", "README.md"), 1.0, None),
+        ("tool", ("Update", "README.md"), 2.0, write("README.md", "# api\n\nThe example service.\n\n## Quick start\n\n```bash\ngo run ./cmd/api\n```\n\nRequires Go 1.23.\n")),
+        ("out", "Updated with 7 additions", 0.4, None),
+        ("say", "Added a quick start to the README.", 0.6, None),
+    ]
+
+def main():
+    # Raw from the first instant: a prompt sent with the session (N) arrives
+    # before the banner is drawn, and the line discipline would echo it.
+    fd = sys.stdin.fileno()
+    old = termios.tcgetattr(fd)
+    tty.setcbreak(fd)
+    try:
+        run()
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+
+def run():
+    name = os.path.basename(os.getcwd()).rsplit("_", 1)[0]
+    W(f"{MG}✻{RST} {BOLD}demo agent{RST} {DIM}· {name}{RST}\n\n")
+    first = True
+    while True:
+        box()
+        line = read_line()
+        close_box()
+        W("\n")
+        if first:
+            verb, steps = plan(name)
+            work(steps, verb)
+            first = False
+        else:
+            work([("say", "Noted.", 1.0, None)], "Thinking")
+
+if __name__ == "__main__":
+    try: main()
+    except KeyboardInterrupt: pass

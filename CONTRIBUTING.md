@@ -25,6 +25,21 @@ so the tmux tests start their own server: `env -u TMUX go test ./...`.
 - Include a test that fails without your change when you fix a bug.
 - Comments explain *why*: the failure a line prevents, not what it does.
 
+## The README recording
+
+`assets/demo.gif` is recorded from the real TUI, not drawn. `demo/record.py`
+builds a throwaway home, repository and tmux server, runs `adroit` in a
+pseudo-terminal with `demo/agent` standing in for the coding agent, and types a
+fixed script of keys. [agg](https://github.com/asciinema/agg) renders the result:
+
+```bash
+go build -o /tmp/adroit . && python3 demo/record.py /tmp/adroit /tmp/demo.cast
+agg --theme nord --font-size 15 --idle-time-limit 3 /tmp/demo.cast assets/demo.gif
+cp assets/demo.gif site/demo.gif
+```
+
+Re-record it when the interface changes.
+
 ## Releasing
 
 Releases are cut by pushing a tag. The release workflow runs the tests, then

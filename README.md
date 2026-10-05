@@ -2,14 +2,16 @@
 
 [![Release](https://img.shields.io/github/v/release/AlexanderWeismannn/adroit)](https://github.com/AlexanderWeismannn/adroit/releases)
 [![Build](https://github.com/AlexanderWeismannn/adroit/actions/workflows/build.yml/badge.svg)](https://github.com/AlexanderWeismannn/adroit/actions/workflows/build.yml)
-[![Website](https://img.shields.io/badge/site-adroit-5e81ac)](https://alexanderweismannn.github.io/adroit/)
+[![Website](https://img.shields.io/badge/site-adroit-88c0d0)](https://alexanderweismannn.github.io/adroit/)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE.md)
 
 Adroit is a terminal app that manages multiple coding agents — [Claude Code](https://github.com/anthropics/claude-code), [Codex](https://github.com/openai/codex), [Gemini](https://github.com/google-gemini/gemini-cli), [Aider](https://github.com/Aider-AI/aider) — each in its own isolated git workspace, so you can run several tasks at once and review them side by side.
 
 It is a fork of [claude-squad](https://github.com/smtg-ai/claude-squad), which contributed the tmux-and-git-worktree foundation. The session model, the instance list, theming and most of the interface have since been reworked; see [Differences from claude-squad](#differences-from-claude-squad).
 
-![Screenshot](assets/screenshot.png)
+![Adroit running three agents at once, reviewing a diff, previewing themes, and attaching to a session](assets/demo.gif)
+
+<sub>Recorded from the real app with a scripted stand-in agent; see [`demo/`](demo/record.py).</sub>
 
 ### Highlights
 
