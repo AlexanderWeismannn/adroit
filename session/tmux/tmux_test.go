@@ -747,3 +747,54 @@ func TestPollPaneReportsASessionThatHasGone(t *testing.T) {
 	require.NoError(t, exec.Command("tmux", "kill-session", "-t", SessionTarget(name)).Run())
 	require.True(t, s.PollPane().Gone)
 }
+
+// IsHusk is what tells a session tmux-resurrect rebuilt as a bare shell from
+// one that is running its program. Both tells are needed: the foreground is a
+// shell, and that shell has nothing under it. A wrapper shell with the program
+// as its child is a session doing its job, and a program that is itself a shell
+// is never a husk.
+func TestIsHuskNeedsAnIdleShellWithNothingUnderIt(t *testing.T) {
+	cases := []struct {
+		name, program, foreground string
+		children                  bool
+		husk                      bool
+	}{
+		{"shell where claude should be", "claude", "zsh", false, true},
+		{"login shell", "claude", "-bash", false, true},
+		{"claude running", "claude", "claude", false, false},
+		{"resumed claude", "claude --resume 1234", "claude", false, false},
+		{"wrapper shell with the program under it", "claude", "zsh", true, false},
+		{"a program that is itself a shell", "zsh", "zsh", false, false},
+		{"a tool the agent is running", "claude", "node", false, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cmdExec := cmd_test.MockCmdExec{OutputFunc: func(cmd *exec.Cmd) ([]byte, error) {
+				switch {
+				case strings.Contains(cmd.String(), "pane_current_command"):
+					return []byte("4242 " + c.foreground + "\n"), nil
+				case strings.Contains(cmd.String(), "pgrep"):
+					if c.children {
+						return []byte("4243\n"), nil
+					}
+					return nil, exec.Command("sh", "-c", "exit 1").Run()
+				}
+				return nil, fmt.Errorf("unexpected command: %s", cmd)
+			}}
+			session := NewTmuxSessionWithDeps("s", c.program, NewMockPtyFactory(t), cmdExec)
+			require.Equal(t, c.husk, session.IsHusk())
+		})
+	}
+
+	// A question that cannot be answered -- no pgrep, say -- never costs a session.
+	t.Run("an unanswerable read is not a husk", func(t *testing.T) {
+		cmdExec := cmd_test.MockCmdExec{OutputFunc: func(cmd *exec.Cmd) ([]byte, error) {
+			if strings.Contains(cmd.String(), "pane_current_command") {
+				return []byte("4242 zsh\n"), nil
+			}
+			return nil, exec.Command("sh", "-c", "exit 127").Run()
+		}}
+		session := NewTmuxSessionWithDeps("s", "claude", NewMockPtyFactory(t), cmdExec)
+		require.False(t, session.IsHusk())
+	})
+}

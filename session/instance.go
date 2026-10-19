@@ -457,6 +457,17 @@ func (i *Instance) Start(firstTimeSetup bool) error {
 		// are still on disk. Park the instance as Paused so Resume can rebuild it.
 		// Reporting an error here would be worse than useless: LoadInstances aborts on
 		// the first failure, so a single dead session would hide every other instance.
+		//
+		// A session that exists by name but holds an idle shell is the same case
+		// wearing a disguise: tmux-resurrect rebuilt it after the reboot, without
+		// the program. Attaching to it put a shell prompt in the preview under a
+		// Running row. It is discarded -- there is nothing in it -- and the session
+		// parked, so that r resumes the conversation the way it does after any
+		// other restart.
+		if i.discardHusk() {
+			i.SetStatus(Paused)
+			return nil
+		}
 		if err := tmuxSession.Restore(); err != nil {
 			if errors.Is(err, tmux.ErrSessionNotFound) {
 				log.WarningLog.Printf(
@@ -930,6 +941,21 @@ func (i *Instance) Pause() error {
 	return nil
 }
 
+// discardHusk kills the session's tmux session if it exists in name only -- an
+// idle shell where the program should be -- and reports whether it did.
+func (i *Instance) discardHusk() bool {
+	if !i.tmuxSession.DoesSessionExist() || !i.tmuxSession.IsHusk() {
+		return false
+	}
+	log.WarningLog.Printf(
+		"tmux session for %q holds an idle shell, not %s; discarding it so the conversation can be resumed",
+		i.Title, i.Program)
+	if err := i.tmuxSession.Close(); err != nil {
+		log.ErrorLog.Printf("could not discard the empty session for %q: %v", i.Title, err)
+	}
+	return true
+}
+
 // Resume recreates the worktree and restarts the tmux session
 func (i *Instance) Resume() error {
 	if !i.started {
@@ -948,8 +974,10 @@ func (i *Instance) Resume() error {
 	if i.noWorktree {
 		// Prefer the existing session if one is somehow there: Start refuses a
 		// duplicate name, so reattaching is both correct and the only thing that
-		// can work.
-		if i.tmuxSession.DoesSessionExist() {
+		// can work. Unless it is a husk, which is nothing to reattach to.
+		if i.discardHusk() {
+			// Nothing left; start below.
+		} else if i.tmuxSession.DoesSessionExist() {
 			if err := i.tmuxSession.Restore(); err != nil {
 				log.ErrorLog.Print(err)
 				return fmt.Errorf("failed to restore existing session: %w", err)
@@ -988,8 +1016,9 @@ func (i *Instance) Resume() error {
 		}
 	}
 
-	// Check if tmux session still exists from pause, otherwise create new one
-	if i.tmuxSession.DoesSessionExist() {
+	// Check if tmux session still exists from pause, otherwise create new one.
+	// A husk counts as gone: see Start.
+	if !i.discardHusk() && i.tmuxSession.DoesSessionExist() {
 		// Session exists, just restore PTY connection to it
 		if err := i.tmuxSession.Restore(); err != nil {
 			log.ErrorLog.Print(err)
