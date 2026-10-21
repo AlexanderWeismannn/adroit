@@ -136,6 +136,38 @@ func TestStartDiscardsAHuskLeftByTmuxResurrect(t *testing.T) {
 	require.Zero(t, ptyFactory.calls, "nothing worth attaching to")
 }
 
+// resurrect rebuilds every saved name, including sessions Adroit has since
+// killed, so a new session can find its name taken by a husk no row owns.
+// Start refused it with "tmux session already exists", and the name stayed
+// unusable until the husk was killed by hand.
+func TestNewSessionStartsOverAHuskWithItsName(t *testing.T) {
+	ptyFactory := &recordingPtyFactory{t: t}
+	husk := true
+	cmdExec := cmd_test.MockCmdExec{
+		RunFunc: func(cmd *exec.Cmd) error {
+			switch {
+			case strings.Contains(cmd.String(), "kill-session"):
+				husk = false
+			case strings.Contains(cmd.String(), "has-session") && !husk && !ptyFactory.created:
+				return fmt.Errorf("can't find session")
+			}
+			return nil
+		},
+		OutputFunc: paneHusk,
+	}
+
+	inst, err := NewInstance(InstanceOptions{
+		Title: "scratch", Path: t.TempDir(), Program: "claude", NoWorktree: true,
+	})
+	require.NoError(t, err)
+	inst.SetTmuxSession(tmux.NewTmuxSessionWithDeps("scratch", "claude", ptyFactory, cmdExec))
+
+	require.NoError(t, inst.Start(true))
+	require.Equal(t, Running, inst.Status)
+	require.NotEmpty(t, ptyFactory.cmds)
+	require.Contains(t, ptyFactory.cmds[0], "new-session")
+}
+
 // The row used to be labelled with the branch the session was created with, so a
 // rename or a checkout inside the worktree left it naming something the repo no
 // longer had. Branch itself must not move: every operation the session owns —

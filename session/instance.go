@@ -534,7 +534,12 @@ func (i *Instance) Start(firstTimeSetup bool) error {
 // Every tmux start goes through here. The decision cannot live in Start alone:
 // resume starts a session too, and resume is the case the whole mechanism
 // exists for.
+//
+// A husk holding the name is discarded first. resurrect rebuilds every name it
+// saved, including those of sessions since killed, so a new session can find
+// its name taken by a shell no row owns, and tmux refuses a duplicate name.
 func (i *Instance) startTmux(dir string) error {
+	i.discardHusk()
 	i.tmuxSession.SetLaunchCommand(withAgentKeys(i.launchCommandFor(dir), i.Program, config.PeekConfig()))
 	return i.tmuxSession.Start(dir)
 }
