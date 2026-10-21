@@ -2,6 +2,7 @@ package git
 
 import (
 	"context"
+	"fmt"
 	"github.com/AlexanderWeismannn/adroit/cmd"
 	"github.com/AlexanderWeismannn/adroit/config"
 	"github.com/AlexanderWeismannn/adroit/log"
@@ -39,8 +40,8 @@ const baseSyncTimeout = 20 * time.Second
 //
 // It returns the commit the new branch should be cut from, or "" for HEAD. The
 // fast-forward of the main checkout is a courtesy, not a precondition: when a
-// stray untracked file or a local edit blocks it, the session is still cut from
-// the upstream tip. Before that, one leftover untracked file in the main
+// local edit blocks it, the session is still cut from the upstream tip. (An
+// untracked file in the way is stashed instead; see fastForwardPastUntracked.) Before that, one leftover untracked file in the main
 // checkout silently pinned every new session to a weeks-old base.
 func (g *GitWorktree) syncBaseBranch() string {
 	if !config.LoadConfig().SyncBaseBranchEnabled() {
@@ -98,12 +99,87 @@ func (g *GitWorktree) syncBaseBranch() string {
 	// checkout untouched: the user's work in progress there outranks a tidy main
 	// checkout. The session is cut from the upstream tip either way.
 	tip := strings.TrimSpace(target)
-	if _, err := g.runGitCommand(g.repoPath, "merge", "--ff-only", remoteRef); err != nil {
+	_, err = g.runGitCommand(g.repoPath, "merge", "--ff-only", remoteRef)
+	if err != nil {
+		err = g.fastForwardPastUntracked(branch, remoteRef, err)
+	}
+	if err != nil {
 		log.InfoLog.Printf("could not fast-forward %s to %s (branching %s from %s anyway): %v", branch, remoteRef, g.branchName, remoteRef, err)
 		return tip
 	}
 	log.InfoLog.Printf("fast-forwarded %s to %s before creating %s", branch, remoteRef, g.branchName)
 	return tip
+}
+
+// baseSyncStashMessage labels the stash fastForwardPastUntracked leaves behind,
+// so `git stash list` says where it came from.
+const baseSyncStashMessage = "adroit: untracked files that blocked a fast-forward"
+
+// fastForwardPastUntracked retries a fast-forward that mergeErr says was refused,
+// after moving the untracked files that the upstream adds into a stash.
+//
+// Those files are the usual reason a fast-forward is refused, and a stubborn
+// one: a draft that was later committed upstream in finished form -- a
+// scaffolded migration, say -- blocks every fast-forward from then on, and
+// nothing prompts anyone to clean it up. One such file kept a main checkout 559
+// commits behind. The stash keeps them, so nothing is lost: `git stash pop`
+// puts them back.
+//
+// Only the blocking files are stashed, and only untracked ones; an edit to a
+// tracked file still refuses the fast-forward, as it did before. If the retry
+// fails anyway, the stash is popped straight back, so a refusal leaves the
+// checkout exactly as it was found.
+func (g *GitWorktree) fastForwardPastUntracked(branch, remoteRef string, mergeErr error) error {
+	blocking := g.untrackedFilesAdded(remoteRef)
+	if len(blocking) == 0 {
+		return mergeErr
+	}
+
+	args := []string{"stash", "push", "--include-untracked", "-m", baseSyncStashMessage, "--"}
+	for _, path := range blocking {
+		args = append(args, ":(literal)"+path)
+	}
+	if _, err := g.runGitCommand(g.repoPath, args...); err != nil {
+		return fmt.Errorf("%w; stashing the untracked files in the way also failed: %v", mergeErr, err)
+	}
+
+	if _, err := g.runGitCommand(g.repoPath, "merge", "--ff-only", remoteRef); err != nil {
+		if _, popErr := g.runGitCommand(g.repoPath, "stash", "pop"); popErr != nil {
+			log.ErrorLog.Printf("could not put back %s after a refused fast-forward; they are in the stash %q: %v",
+				strings.Join(blocking, ", "), baseSyncStashMessage, popErr)
+		}
+		return err
+	}
+	log.WarningLog.Printf("stashed untracked %s, which blocked fast-forwarding %s to %s; `git stash pop` in %s restores them",
+		strings.Join(blocking, ", "), branch, remoteRef, g.repoPath)
+	return nil
+}
+
+// untrackedFilesAdded lists the untracked, unignored files in the main checkout
+// that a fast-forward to remoteRef would have to overwrite. Ignored files are
+// left out because git overwrites those without asking.
+func (g *GitWorktree) untrackedFilesAdded(remoteRef string) []string {
+	untracked, err := g.runGitCommand(g.repoPath, "ls-files", "-z", "--others", "--exclude-standard")
+	if err != nil {
+		return nil
+	}
+	incoming, err := g.runGitCommand(g.repoPath, "diff", "-z", "--name-only", "--diff-filter=A", "HEAD", remoteRef)
+	if err != nil {
+		return nil
+	}
+	added := make(map[string]bool)
+	for _, path := range strings.Split(incoming, "\x00") {
+		if path != "" {
+			added[path] = true
+		}
+	}
+	var blocking []string
+	for _, path := range strings.Split(untracked, "\x00") {
+		if added[path] {
+			blocking = append(blocking, path)
+		}
+	}
+	return blocking
 }
 
 // currentBranch returns the checked-out branch of the main repository, or "" if
