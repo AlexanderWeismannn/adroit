@@ -19,9 +19,11 @@ import (
 	"hash/fnv"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -35,13 +37,55 @@ const GlobalInstanceLimit = 10
 
 // Run is the main entrypoint into the application.
 func Run(ctx context.Context, program string, autoYes bool) error {
+	h := newHome(ctx, program, autoYes)
 	p := tea.NewProgram(
-		newHome(ctx, program, autoYes),
+		h,
 		tea.WithAltScreen(),
-		tea.WithMouseCellMotion(), // Mouse scroll
+		tea.WithMouseCellMotion(),  // Mouse scroll
+		tea.WithoutSignalHandler(), // see handleTermination
 	)
+	defer handleTermination(p, h.terminating)()
 	_, err := p.Run()
 	return err
+}
+
+// terminateMsg is delivered once a SIGTERM or SIGINT has arrived, and anything
+// attached has been detached.
+type terminateMsg struct{}
+
+// handleTermination makes `kill` quit Adroit, and returns the function that
+// stops listening.
+//
+// Bubbletea's own handler does not do this. It ignores signals whenever the
+// terminal is released, which is the whole time a session is attached -- and
+// attached is the state Adroit is usually left in when its terminal window is
+// closed, since tmux keeps it running. So the one moment someone reaches for
+// `kill` is the one moment the signal was thrown away, and the instance lock
+// kept every later launch out. Its quit also skipped saving the instances.
+//
+// Closing terminating ends an attach in progress (see attachCommand.Run), which
+// hands the event loop back so the quit can be delivered. A second signal gets
+// the default action and kills the process outright: the way out if the quit
+// itself is what has wedged.
+func handleTermination(p *tea.Program, terminating chan struct{}) (stop func()) {
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-done:
+			return
+		case sig := <-sigs:
+			log.InfoLog.Printf("received %v, quitting", sig)
+		}
+		signal.Reset(syscall.SIGINT, syscall.SIGTERM)
+		close(terminating)
+		p.Send(terminateMsg{})
+	}()
+	return func() {
+		signal.Stop(sigs)
+		close(done)
+	}
 }
 
 type state int
@@ -78,6 +122,8 @@ type home struct {
 	// name prompt, which is where esc should return to.
 	branchFromNaming bool
 	ctx              context.Context
+	// terminating is closed when a signal has told Adroit to quit.
+	terminating chan struct{}
 
 	// -- Storage and Configuration --
 
@@ -268,14 +314,27 @@ type attachFinishedMsg struct{ err error }
 // those are the same two files bubbletea would hand over here.
 type attachCommand struct {
 	attach func() (chan struct{}, error)
+	// terminating is closed when Adroit has been told to quit; see
+	// handleTermination.
+	terminating <-chan struct{}
 }
 
 func (c *attachCommand) Run() error {
+	select {
+	case <-c.terminating:
+		return nil
+	default:
+	}
 	ch, err := c.attach()
 	if err != nil {
 		return err
 	}
-	<-ch
+	select {
+	case <-ch:
+	case <-c.terminating:
+		tmux.DetachAttached()
+		<-ch
+	}
 	return nil
 }
 
@@ -299,7 +358,7 @@ func (c *attachCommand) SetStderr(io.Writer) {}
 // reached through a help screen. From the event loop the send has already
 // landed, the reader is idle in a read, and the cancel works.
 func (m *home) attachCmd(attach func() (chan struct{}, error)) tea.Cmd {
-	return tea.Exec(&attachCommand{attach: attach}, func(err error) tea.Msg {
+	return tea.Exec(&attachCommand{attach: attach, terminating: m.terminating}, func(err error) tea.Msg {
 		return attachFinishedMsg{err: err}
 	})
 }
@@ -339,6 +398,7 @@ func newHome(ctx context.Context, program string, autoYes bool) *home {
 		state:             stateDefault,
 		appState:          appState,
 		devStack:          devStack,
+		terminating:       make(chan struct{}),
 	}
 	h.list = ui.NewList(&h.spinner, autoYes)
 	// New sessions are always created in the working directory, so the naming
@@ -452,6 +512,13 @@ func (m *home) Init() tea.Cmd {
 
 func (m *home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case terminateMsg:
+		// Unlike q, a save that fails does not stop the quit: whoever sent the
+		// signal is not looking at the error box.
+		if err := m.storage.SaveInstances(m.list.GetInstances()); err != nil {
+			log.ErrorLog.Printf("could not save the sessions before quitting: %v", err)
+		}
+		return m, tea.Quit
 	case attachFinishedMsg:
 		// Back from a session. Both panes and the session itself may be the wrong
 		// shape now: it was resized to the real terminal while attached, and the

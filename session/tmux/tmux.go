@@ -116,6 +116,30 @@ type TmuxSession struct {
 
 const TmuxPrefix = "adroit_"
 
+// attached is the session the terminal is handed to right now, if any. There is
+// one terminal, so there is at most one. It is what lets something other than
+// the session's own input pump end an attach: a SIGTERM arrives on its own
+// goroutine knowing nothing about which session is on screen.
+var (
+	attachedMu sync.Mutex
+	attached   *TmuxSession
+)
+
+// DetachAttached ends whichever attach currently holds the terminal, leaving no
+// client behind, and reports whether there was one.
+func DetachAttached() bool {
+	attachedMu.Lock()
+	t := attached
+	attachedMu.Unlock()
+	if t == nil {
+		return false
+	}
+	if err := t.DetachSafely(); err != nil {
+		log.ErrorLog.Printf("errors while detaching from %s: %v", t.sanitizedName, err)
+	}
+	return true
+}
+
 // ErrSessionNotFound is returned when the tmux session backing an instance is gone, which
 // happens whenever the tmux server dies (reboot, crash, `tmux kill-server`).
 var ErrSessionNotFound = errors.New("tmux session no longer exists")
@@ -749,6 +773,10 @@ func (t *TmuxSession) Attach() (chan struct{}, error) {
 	t.attachCh = attachCh
 	t.stdin = stdin
 
+	attachedMu.Lock()
+	attached = t
+	attachedMu.Unlock()
+
 	t.wg = &sync.WaitGroup{}
 	t.wg.Add(1)
 	t.ctx, t.cancel = context.WithCancel(context.Background())
@@ -932,6 +960,12 @@ func (t *TmuxSession) detach(wait, restore bool) error {
 	if ch == nil {
 		return nil
 	}
+
+	attachedMu.Lock()
+	if attached == t {
+		attached = nil
+	}
+	attachedMu.Unlock()
 
 	var errs []error
 
