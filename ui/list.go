@@ -22,6 +22,12 @@ import (
 const readyIcon = "● "
 const pausedIcon = "⏸ "
 
+// pausedMark is what a paused row wears: the glyph and the word. Every other
+// state that asks something of you is a word already -- "done", "input" -- and
+// a bare glyph for the one state where the session has gone away entirely was
+// the mark most often asked about.
+const pausedMark = "⏸ paused "
+
 // doneChip is the mark a session wears for the few seconds after it finishes.
 //
 // It fills its background rather than brightening its text. theme.Success is a
@@ -296,6 +302,25 @@ func (l *List) SetDevStack(title string, state dev.LampState) {
 	l.renderer.devStackState = state
 }
 
+// SetBusy marks a row as having an action in flight, with the word for it, and
+// ClearBusy takes the mark off once the action has come back.
+func (l *List) SetBusy(instance *session.Instance, doing string) {
+	if l.renderer.busy == nil {
+		l.renderer.busy = map[*session.Instance]string{}
+	}
+	l.renderer.busy[instance] = doing
+}
+
+func (l *List) ClearBusy(instance *session.Instance) {
+	delete(l.renderer.busy, instance)
+}
+
+// Busy reports whether any row has an action in flight, which is when the
+// animation has to be running.
+func (l *List) Busy() bool {
+	return len(l.renderer.busy) > 0
+}
+
 func (l *List) NumInstances() int {
 	return len(l.items)
 }
@@ -324,6 +349,13 @@ type InstanceRenderer struct {
 
 	spinner *spinner.Model
 	width   int
+
+	// busy is the rows an action is running on off the loop, and what the
+	// action is: "checking out", "resuming". The row spins and says so from the
+	// keypress, not from the moment the work comes back. Without it a checkout
+	// of a large worktree was seconds of nothing happening on a key that
+	// usually does something at once.
+	busy map[*session.Instance]string
 
 	// now is the clock the just-finished window is measured against. Injectable
 	// so a test can place a row inside or outside the window without sleeping
@@ -743,8 +775,19 @@ func (r *InstanceRenderer) statusMark(i *session.Instance, beingNamed, selected 
 		// Blank, but painted: the column is still spent, and an unstyled hole at
 		// the end of the row shows as a notch bitten out of the selection bar.
 		return lipgloss.NewStyle().Background(bg).Render(strings.Repeat(" ", glyphWidth)), glyphWidth
+	}
+
+	// An action in flight outranks every state the row would otherwise show,
+	// since it is about to change that state: a paused row being resumed is
+	// not "paused" for the next few seconds, it is "resuming".
+	if doing, ok := r.busy[i]; ok {
+		mark := r.spinner.View() + " " + doing + " "
+		return workingStyle.Background(bg).Render(mark), runewidth.StringWidth(mark)
+	}
+
+	switch {
 	case i.Status == session.Paused:
-		return pausedStyle.Background(bg).Render(pausedIcon), glyphWidth
+		return pausedStyle.Background(bg).Render(pausedMark), runewidth.StringWidth(pausedMark)
 	// Loading is the interface rebuilding the session, not the agent working, but
 	// it is still something in flight -- so it spins, in the accent.
 	case i.Status == session.Loading:
@@ -1113,6 +1156,21 @@ func (r *InstanceRenderer) Render(i *session.Instance, idx int, selected bool, h
 	return text
 }
 
+// emptyListHint is the body of a list with no sessions in it, clipped to the
+// column like every row is.
+func emptyListHint(width int) string {
+	row := func(k, d string) string {
+		return clip(" "+hintKeyStyle.Width(hintKeyColumn).Render(k)+hintDescStyle.Render(d), width)
+	}
+	return strings.Join([]string{
+		clip(" "+hintDescStyle.Render("No sessions yet."), width),
+		"",
+		row("n", "new session"),
+		row("N", "new session with a prompt"),
+		row("?", "every key"),
+	}, "\n")
+}
+
 // scrollIndicator styles the "N more" markers that stand in for the rows a pane
 // too short to hold them cannot show.
 func scrollIndicator(arrow string, n int) string {
@@ -1235,6 +1293,15 @@ func (l *List) String() string {
 	b.WriteString("\n")
 
 	header := b.String()
+
+	// With nothing to list, the body says how to get something: the pane
+	// beside it names n, and the three keys that matter here are worth the
+	// rows that would otherwise be blank.
+	if len(l.items) == 0 {
+		b.WriteString(emptyListHint(l.width))
+		return lipgloss.Place(l.width, l.height, lipgloss.Left, lipgloss.Top, b.String())
+	}
+
 	rendered := make([]string, len(l.items))
 	heights := make([]int, len(l.items))
 	total := 0

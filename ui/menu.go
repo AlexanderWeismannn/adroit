@@ -77,6 +77,14 @@ type Menu struct {
 
 	// keyDown is the key which is pressed. The default is -1.
 	keyDown keys.KeyName
+
+	// dimmed are the action keys this row would have if its state were
+	// different: open PR on a branch whose pull request is not known yet,
+	// update on a branch level with its remote. They are drawn after the
+	// actions in the separator colour, and only while the menu has its full
+	// width. A key that simply vanished read as a bug -- "where did g go?" --
+	// where a dim one says the key exists and is waiting on something.
+	dimmed []keys.KeyName
 }
 
 // Restore sits with the actions in the empty state on purpose: killing the last
@@ -216,6 +224,7 @@ func (m *Menu) setOptions(options []keys.KeyName, groups []menuGroup, actionGrou
 	m.options = options
 	m.groups = groups
 	m.actionGroup = actionGroup
+	m.dimmed = nil
 }
 
 func (m *Menu) addInstanceOptions() {
@@ -316,6 +325,23 @@ func (m *Menu) addInstanceOptions() {
 
 	m.setOptions(options,
 		[]menuGroup{{0, actionStart}, {actionStart, actionEnd}, {actionEnd, len(options)}}, 1)
+
+	// The keys this row is not offered, said dimly, so their absence is seen
+	// to be deliberate. Only for a branch of the session's own: on a repo
+	// session neither key could ever apply, and dimming it would promise one.
+	if !m.instance.NoWorktree() {
+		if !m.canOpenPR() {
+			m.dimmed = append(m.dimmed, keys.KeyOpenPR)
+		}
+		if m.instance.Status != session.Paused && !m.canUpdate() {
+			m.dimmed = append(m.dimmed, keys.KeyUpdate)
+		}
+	}
+}
+
+// Dimmed reports the keys drawn dim: present on the row, inapplicable now.
+func (m *Menu) Dimmed() []keys.KeyName {
+	return append([]keys.KeyName(nil), m.dimmed...)
 }
 
 // canOpenPR reports whether the selected session has a pull request to open.
@@ -455,6 +481,17 @@ func (m *Menu) renderAt(level abbrev) string {
 			if descText != "" {
 				s.WriteString(" ")
 				s.WriteString(localDescStyle.Render(descText))
+			}
+		}
+
+		// The dim keys follow the last action, inside the group, and only at
+		// full width: a key that cannot be pressed to any effect is the first
+		// thing to give way when room is short.
+		if level == abbrevNone && m.actionGroup >= 0 && m.actionGroup < len(m.groups) &&
+			i == m.groups[m.actionGroup].end-1 {
+			for _, k := range m.dimmed {
+				b := keys.GlobalkeyBindings[k]
+				s.WriteString(sepStyle.Render(separator + b.Help().Key + " " + b.Help().Desc))
 			}
 		}
 

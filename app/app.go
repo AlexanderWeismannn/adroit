@@ -16,7 +16,6 @@ import (
 	"github.com/AlexanderWeismannn/adroit/theme"
 	"github.com/AlexanderWeismannn/adroit/ui"
 	"github.com/AlexanderWeismannn/adroit/ui/overlay"
-	"hash/fnv"
 	"io"
 	"os"
 	"os/signal"
@@ -39,7 +38,7 @@ const GlobalInstanceLimit = 10
 func Run(ctx context.Context, program string, autoYes bool) error {
 	h := newHome(ctx, program, autoYes)
 	p := tea.NewProgram(
-		h,
+		maybeProfiled(h),
 		tea.WithAltScreen(),
 		tea.WithMouseCellMotion(),  // Mouse scroll
 		tea.WithoutSignalHandler(), // see handleTermination
@@ -182,9 +181,11 @@ type home struct {
 	// ends when nothing on screen is animating, so something has to know to start
 	// it again -- see spinnerNeeded.
 	spinnerRunning bool
-	// previewHash fingerprints the capture the preview pane is currently showing,
-	// so the tick can tell a pane that has not changed from one that has.
-	previewHash uint64
+	// paneHash fingerprints the capture the active pane is currently showing,
+	// so the tick can tell a pane that has not changed from one that has, and
+	// paneChanged is when it last did, which sets the sampling pace.
+	paneHash    uint64
+	paneChanged time.Time
 	// textInputOverlay handles text input with state
 	textInputOverlay *overlay.TextInputOverlay
 	// textOverlay displays text information
@@ -504,7 +505,7 @@ func (m *home) Init() tea.Cmd {
 	return tea.Batch(
 		notice,
 		m.spinner.Tick,
-		m.previewTick(),
+		m.paneTick(),
 		tickUpdateMetadataCmd(m.planMetadata(m.snapshotActiveInstances()),
 			m.appConfig.CIStatusEnabled(), m.appConfig.UpstreamStatusEnabled(), m.devStack),
 	)
@@ -534,18 +535,8 @@ func (m *home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.seq == m.errSeq {
 			m.errBox.Clear()
 		}
-	case previewTickMsg:
-		var cmd tea.Cmd
-		if msg.hasContent {
-			// The capture is in hand, so nothing here touches tmux: apply it and
-			// sync the panes that read cached state.
-			m.previewHash = msg.hash
-			m.tabbedWindow.ApplyPreviewCapture(m.list.GetSelectedInstance(), msg.content)
-			m.syncSelection()
-		} else {
-			cmd = m.instanceChanged()
-		}
-		return m, tea.Batch(cmd, m.previewTick())
+	case paneTickMsg:
+		return m, tea.Batch(m.applyPaneTick(msg), m.paneTick())
 	case keyupMsg:
 		m.menu.ClearKeydown()
 		return m, nil
@@ -760,6 +751,7 @@ func (m *home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case instanceResumedMsg:
 		delete(m.busy, msg.instance)
+		m.list.ClearBusy(msg.instance)
 		if msg.err != nil {
 			return m, m.handleError(msg.err)
 		}
@@ -769,7 +761,10 @@ func (m *home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// conversation is indistinguishable from one that lost it until you
 		// scroll. Only worth saying when there was a conversation at stake: an
 		// ordinary pause and resume never restarts anything.
-		var notice tea.Cmd
+		// The ordinary resume gets a line too: the help card that used to stand
+		// in for one is shown once per install, and after that a key that takes
+		// seconds should still say when it is done.
+		notice := m.handleNotice(fmt.Sprintf("resumed %s", msg.instance.Title))
 		if msg.instance.ResumedConversation() {
 			notice = m.handleNotice(fmt.Sprintf("resumed %s with its conversation", msg.instance.Title))
 		}
@@ -784,6 +779,7 @@ func (m *home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case instancePausedMsg:
 		delete(m.busy, msg.instance)
+		m.list.ClearBusy(msg.instance)
 		if msg.err != nil {
 			return m, m.handleError(msg.err)
 		}
@@ -796,7 +792,13 @@ func (m *home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if err := m.storage.SaveInstances(m.list.GetInstances()); err != nil {
 			return m, m.handleError(err)
 		}
-		return m, m.instanceChanged()
+		// What the checkout card said, in one line, every time: where the branch
+		// went and which key brings the session back.
+		notice := fmt.Sprintf("checked out %s · r resumes it", msg.instance.Title)
+		if msg.instance.BranchCopied() {
+			notice = fmt.Sprintf("checked out %s · branch on the clipboard · r resumes it", msg.instance.Title)
+		}
+		return m, tea.Batch(m.instanceChanged(), m.handleNotice(notice))
 	case instanceStartedMsg:
 		// Select the instance that just started (or failed)
 		m.list.SelectInstance(msg.instance)
@@ -1453,6 +1455,13 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 		if selected == nil || selected.Status == session.Loading {
 			return m, nil
 		}
+		// The key is drawn dim when no pull request is known, and a press on it
+		// gets the reason rather than gh's error after a round trip. Only when
+		// the lookup is on: switched off, nothing is known either way and gh is
+		// the one that can say.
+		if m.appConfig.CIStatusEnabled() && selected.GetCIStatus().PRNumber == 0 {
+			return m, m.handleNotice(fmt.Sprintf("no pull request known for %s yet — push it with p, then g opens it", selected.Title))
+		}
 		worktree, err := selected.GetGitWorktree()
 		if err != nil {
 			return m, m.handleError(err)
@@ -1687,6 +1696,7 @@ func (m *home) syncNaming(on bool) {
 
 func (m *home) instanceChanged() tea.Cmd {
 	m.syncSelection()
+	m.resetPaneHash()
 	selected := m.list.GetSelectedInstance()
 
 	// If there's no selected instance, we don't need to update the preview.
@@ -1727,30 +1737,6 @@ func messageLifetime(text string) time.Duration {
 	d := 3*time.Second + time.Duration(len(text))*40*time.Millisecond
 	return min(d, 10*time.Second)
 }
-
-// previewTickMsg drives the preview pane, carrying the capture the tick already
-// took when it took one.
-//
-// The tick used to fire unconditionally every 100ms and have Update do the
-// capture, which put a subprocess in the event loop ten times a second and
-// re-rendered the whole interface whether or not a byte of the pane had changed.
-// Now the capture happens in the command, and a pane that has not changed
-// produces no message at all -- and so no render.
-type previewTickMsg struct {
-	content    string
-	hasContent bool
-	hash       uint64
-}
-
-const (
-	// previewInterval is how often the selected session's pane is sampled.
-	previewInterval = 100 * time.Millisecond
-	// previewFloor is how long the tick will go without emitting anything at all.
-	// A pane can be still while the state around it is not -- a session going
-	// paused, an instance being named -- and this is the ceiling on how long the
-	// pane can lag those.
-	previewFloor = time.Second
-)
 
 // killApprovedMsg carries a session that has passed the checks a kill can fail,
 // back onto the update loop so the model can be changed before anything is torn
@@ -1811,50 +1797,6 @@ func (m *home) runBranchSearch(filter string, version uint64) tea.Cmd {
 	}
 }
 
-// previewTickCmd samples the selected session's pane until it differs from what
-// the pane is already showing, then hands the capture back.
-//
-// capture is false wherever there is nothing to sample -- another tab is open,
-// the pane is in scroll mode, the session is paused or not started -- and there
-// the command degrades to a plain 100ms tick, which is what it always was.
-func previewTickCmd(selected *session.Instance, capture bool, lastHash uint64) tea.Cmd {
-	return func() tea.Msg {
-		deadline := time.Now().Add(previewFloor)
-		for {
-			time.Sleep(previewInterval)
-			if !capture {
-				return previewTickMsg{}
-			}
-			content, err := selected.Preview()
-			if err != nil {
-				// Let Update take the ordinary path, which reports it in the pane.
-				return previewTickMsg{}
-			}
-			if h := hashPreview(content); h != lastHash || time.Now().After(deadline) {
-				return previewTickMsg{content: content, hasContent: true, hash: h}
-			}
-		}
-	}
-}
-
-// hashPreview fingerprints a capture. FNV-1a because the only question asked of
-// it is "same as last time", over a few tens of kilobytes, a few times a second.
-func hashPreview(content string) uint64 {
-	h := fnv.New64a()
-	_, _ = h.Write([]byte(content))
-	return h.Sum64()
-}
-
-// previewTick builds the next preview tick from the current state of the
-// interface.
-func (m *home) previewTick() tea.Cmd {
-	selected := m.list.GetSelectedInstance()
-	capture := selected != nil &&
-		selected.Started() && selected.Status != session.Paused &&
-		m.tabbedWindow.IsInPreviewTab() && !m.tabbedWindow.IsPreviewInScrollMode()
-	return previewTickCmd(selected, capture, m.previewHash)
-}
-
 // spinnerNeeded reports whether anything on screen is animating.
 //
 // The spinner used to re-tick forever, so an interface with nothing moving in it
@@ -1863,7 +1805,7 @@ func (m *home) previewTick() tea.Cmd {
 // actually changes; the metadata tick re-evaluates this twice a second, so the
 // animation restarts within a tick of a session picking work back up.
 func (m *home) spinnerNeeded() bool {
-	if m.instanceStarting {
+	if m.instanceStarting || m.list.Busy() {
 		return true
 	}
 	for _, inst := range m.list.GetInstances() {
@@ -2008,7 +1950,15 @@ func (m *home) offLoop(instance *session.Instance, doing string, work func() tea
 		m.busy = map[*session.Instance]bool{}
 	}
 	m.busy[instance] = true
-	return tea.Batch(m.handleNotice(fmt.Sprintf("%s %s…", doing, instance.Title)), work)
+	// The row says so too, from this keypress: the notice is a line at the
+	// bottom of the screen, and the eye is on the row the key was pressed on.
+	m.list.SetBusy(instance, doing)
+	cmds := []tea.Cmd{m.handleNotice(fmt.Sprintf("%s %s…", doing, instance.Title)), work}
+	if !m.spinnerRunning {
+		m.spinnerRunning = true
+		cmds = append(cmds, m.spinner.Tick)
+	}
+	return tea.Batch(cmds...)
 }
 
 // runInstanceStartCmd returns a Cmd that performs the expensive instance.Start(true)

@@ -192,3 +192,52 @@ func TestTheWindowNeverHandsAPaneANegativeSize(t *testing.T) {
 		}
 	}
 }
+
+// The window's bottom border says whether what the pane shows is live. A live
+// pane and a stale one -- a parked session, a tab scrolled back into history
+// -- were identical under the same border, and the only way to tell was to
+// wait and see whether anything moved.
+func TestTheFooterSaysWhetherThePaneIsLive(t *testing.T) {
+	w := newTestTabbedWindow()
+	w.SetSize(60, 20)
+
+	status, _ := w.paneStatus()
+	require.Equal(t, "", status, "no session, nothing to say")
+
+	inst, err := session.FromInstanceData(session.InstanceData{
+		Title: "a", Path: t.TempDir(), Status: session.Paused, Program: "claude", NoWorktree: true,
+	})
+	require.NoError(t, err)
+	w.SetInstance(inst)
+	status, _ = w.paneStatus()
+	require.Equal(t, "⏸ paused · r resumes", status)
+
+	w.activeTab = DiffTab
+	status, _ = w.paneStatus()
+	require.Equal(t, "", status, "an unscrolled diff is just the diff")
+
+	// The footer is the bottom border, exactly as wide as the tab bar above it,
+	// and the whole window still occupies the rows it was given.
+	w.activeTab = PreviewTab
+	lines := strings.Split(w.String(), "\n")
+	require.Len(t, lines, 20)
+	require.Equal(t, lipgloss.Width(lines[1]), lipgloss.Width(lines[len(lines)-1]))
+	require.True(t, strings.HasPrefix(plain(lines[len(lines)-1]), "╰─ ⏸ paused · r resumes "), plain(lines[len(lines)-1]))
+	require.True(t, strings.HasSuffix(plain(lines[len(lines)-1]), "╯"))
+}
+
+// A footer too long for the width is dropped rather than wrapped: a second row
+// takes the layout with it.
+func TestTheFooterGivesWayRatherThanWrapping(t *testing.T) {
+	w := newTestTabbedWindow()
+	inst, err := session.FromInstanceData(session.InstanceData{
+		Title: "a", Path: t.TempDir(), Status: session.Paused, Program: "claude", NoWorktree: true,
+	})
+	require.NoError(t, err)
+	w.SetInstance(inst)
+	for _, width := range []int{40, 12, 6, 3, 2} {
+		footer := w.footer(width)
+		require.Equal(t, width, lipgloss.Width(footer), "width %d", width)
+		require.NotContains(t, footer, "\n")
+	}
+}

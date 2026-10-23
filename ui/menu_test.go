@@ -44,9 +44,45 @@ func TestMenuOffersOpenPROnlyWithAPullRequest(t *testing.T) {
 			m.SetInstance(newMenuInstance(t, tt.status))
 
 			require.Equal(t, tt.want, hasOption(m, keys.KeyOpenPR))
-			require.Equal(t, tt.want, strings.Contains(m.String(), "open PR"))
+			// Said either way: offered in the action colour, or dim after the
+			// actions so its absence is seen to be deliberate.
+			require.Contains(t, m.String(), "open PR")
+			require.Equal(t, !tt.want, isDimmed(m, keys.KeyOpenPR))
 		})
 	}
+}
+
+// A dim key is drawn only while the menu has its full width -- it is the first
+// thing to give way -- and never for a session that could never have it.
+func TestDimmedKeysGiveWayFirstAndNeverApplyToARepoSession(t *testing.T) {
+	m := NewMenu()
+	m.SetSize(200, 1)
+	m.SetInstance(newMenuInstance(t, ci.Status{}))
+	require.True(t, isDimmed(m, keys.KeyOpenPR))
+	require.True(t, isDimmed(m, keys.KeyUpdate))
+	full := m.String()
+	require.Contains(t, full, "open PR")
+
+	// Abbreviated, the dim keys are gone before any real key loses its word.
+	abbreviated := m.renderAt(abbrevSystem)
+	require.NotContains(t, abbreviated, "open PR")
+	require.NotContains(t, abbreviated, "update")
+	require.Contains(t, abbreviated, "push")
+
+	repo, err := session.NewInstance(session.InstanceOptions{Title: "scratch", Path: ".", Program: "echo", NoWorktree: true})
+	require.NoError(t, err)
+	m.SetInstance(repo)
+	require.Empty(t, m.Dimmed())
+	require.NotContains(t, m.String(), "open PR")
+}
+
+func isDimmed(m *Menu, key keys.KeyName) bool {
+	for _, k := range m.Dimmed() {
+		if k == key {
+			return true
+		}
+	}
+	return false
 }
 
 // The CI lookup runs in the background, so a session's pull request becomes known
@@ -56,10 +92,13 @@ func TestMenuPicksUpAPullRequestFoundAfterSelection(t *testing.T) {
 	m := NewMenu()
 	m.SetSize(200, 1)
 	m.SetInstance(inst)
-	require.NotContains(t, m.String(), "open PR")
+	require.False(t, hasOption(m, keys.KeyOpenPR))
+	require.True(t, isDimmed(m, keys.KeyOpenPR))
 
 	inst.SetCIStatus(ci.Status{State: ci.StateSuccess, PRNumber: 4420})
-	require.Contains(t, m.String(), "open PR")
+	_ = m.String()
+	require.True(t, hasOption(m, keys.KeyOpenPR))
+	require.False(t, isDimmed(m, keys.KeyOpenPR))
 }
 
 // The group boundaries used to be a fixed table while the options were
@@ -419,7 +458,8 @@ func TestMenuOffersUpdateOnlyWhenBehindTheRemote(t *testing.T) {
 			m.SetInstance(inst)
 
 			require.Equal(t, tt.want, hasOption(m, keys.KeyUpdate))
-			require.Equal(t, tt.want, strings.Contains(m.String(), "update"))
+			require.Contains(t, m.String(), "update")
+			require.Equal(t, !tt.want, isDimmed(m, keys.KeyUpdate))
 			require.Equal(t, len(m.options), m.groups[len(m.groups)-1].end)
 		})
 	}
@@ -451,8 +491,11 @@ func TestMenuPicksUpStalenessFoundAfterSelection(t *testing.T) {
 	m := NewMenu()
 	m.SetSize(200, 1)
 	m.SetInstance(inst)
-	require.NotContains(t, m.String(), "update")
+	require.False(t, hasOption(m, keys.KeyUpdate))
+	require.True(t, isDimmed(m, keys.KeyUpdate))
 
 	inst.SetUpstreamStatus(upstream.Status{Ref: "origin/review", Behind: 1})
-	require.Contains(t, m.String(), "update")
+	_ = m.String()
+	require.True(t, hasOption(m, keys.KeyUpdate))
+	require.False(t, isDimmed(m, keys.KeyUpdate))
 }

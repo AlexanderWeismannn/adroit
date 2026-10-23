@@ -431,6 +431,10 @@ or `kill` the pid in the message if that one is wedged.
 and contents. Logs go to `adroit.log` in the system temp directory
 (`/tmp/adroit.log` on Linux).
 
+**It feels slow** — run it with `ADROIT_PROFILE=1` and read the `profile` lines
+in the log: how often the interface redraws, what a redraw costs, and which
+messages drove it. `ADROIT_PPROF=localhost:6060` serves Go's pprof alongside.
+
 **Start over** — `adroit reset` removes every stored session, its tmux session and
 its worktree. For the repository you run it in, it also deletes the branch each of
 those worktrees had checked out, **including branches that existed before Adroit**.

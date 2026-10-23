@@ -16,6 +16,11 @@ Run your build against a scratch repository rather than one you care about:
 sessions create real worktrees and branches. Logs go to `adroit.log` in the system temp directory (`/tmp` on Linux,
 `$TMPDIR` on macOS).
 
+To measure the interface rather than guess, run it with `ADROIT_PROFILE=1`: every
+five seconds the log gets a `profile` line with the render rate, the cost of a
+render and the messages that caused them. `ADROIT_PPROF=localhost:6060` adds a
+pprof server for the rest.
+
 If you run the tests from inside tmux (or inside Adroit itself), clear `TMUX`
 so the tmux tests start their own server: `env -u TMUX go test ./...`.
 

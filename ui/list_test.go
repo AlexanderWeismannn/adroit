@@ -1416,3 +1416,44 @@ func TestBadgeWordsGiveWayOneAtATime(t *testing.T) {
 	require.Contains(t, verdict, "passed")
 	require.Less(t, len(verdict), len(review))
 }
+
+// An action in flight -- a checkout, a resume -- is shown on the row from the
+// keypress: the spinner and the word, in place of whatever state the row had,
+// and taking its room out of the title like every other mark. Without it a
+// checkout of a large worktree was seconds of a key doing nothing visible.
+func TestABusyRowSaysWhatItIsDoing(t *testing.T) {
+	r, inst := newTestRenderer(t, 80, "TASK-5823-S2S", ci.Status{})
+	inst.Status = session.Paused
+	idle := r.Render(inst, 1, false, false, false)
+	require.Contains(t, idle, strings.TrimSpace(pausedMark))
+
+	r.busy = map[*session.Instance]string{inst: "resuming"}
+	out := r.Render(inst, 1, false, false, false)
+	require.Contains(t, out, "resuming")
+	require.Contains(t, out, r.spinner.View())
+	require.NotContains(t, out, strings.TrimSpace(pausedMark), "the action outranks the state it is changing")
+	require.Equal(t, lipgloss.Width(idle), lipgloss.Width(out))
+
+	delete(r.busy, inst)
+	require.Contains(t, r.Render(inst, 1, false, false, false), strings.TrimSpace(pausedMark))
+}
+
+// A list with no sessions says how to get one, in the rows that would
+// otherwise be blank, and keeps to its column.
+func TestAnEmptyListNamesTheKeysThatFillIt(t *testing.T) {
+	s := spinner.New()
+	l := NewList(&s, false)
+	l.SetSize(40, 12)
+	out := l.String()
+	require.Contains(t, out, "No sessions yet.")
+	require.Contains(t, out, "new session with a prompt")
+	for _, line := range strings.Split(out, "\n") {
+		require.LessOrEqual(t, lipgloss.Width(line), 40)
+	}
+	// Narrower than the hint, it is clipped to the column rather than wrapped.
+	l.SetSize(20, 12)
+	for _, line := range strings.Split(l.String(), "\n") {
+		require.LessOrEqual(t, lipgloss.Width(line), 20)
+	}
+	require.Equal(t, 12, strings.Count(out, "\n")+1, "the body is placed to the list's height")
+}

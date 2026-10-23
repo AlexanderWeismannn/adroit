@@ -127,6 +127,44 @@ func (t *TerminalPane) UpdateContent(instance *session.Instance) error {
 	return nil
 }
 
+// Sample captures the shell pane the tab is showing for instance, off the
+// event loop. It reports ok=false when there is nothing to sample -- no shell
+// open for this instance yet, or the pane in scroll mode -- and never creates
+// one: UpdateContent does that, on the loop, when the tab is opened.
+//
+// The capture forks tmux, so the lock is held only to find the session and
+// again to apply the result; String() takes the same lock on every render and
+// must not wait on a capture.
+func (t *TerminalPane) Sample(instance *session.Instance) (content string, ok bool, err error) {
+	t.mu.Lock()
+	if instance == nil || t.isScrolling || instance.Title != t.currentTitle {
+		t.mu.Unlock()
+		return "", false, nil
+	}
+	s, found := t.sessions[t.currentTitle]
+	t.mu.Unlock()
+	if !found || s.tmuxSession == nil {
+		return "", false, nil
+	}
+	content, err = s.tmuxSession.CapturePaneContent()
+	if err != nil {
+		return "", false, fmt.Errorf("terminal pane: failed to capture content: %w", err)
+	}
+	return content, true, nil
+}
+
+// ApplySample hands the pane a capture Sample took, unless the pane has moved
+// on since: another instance, or scroll mode entered meanwhile.
+func (t *TerminalPane) ApplySample(instance *session.Instance, content string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if instance == nil || t.isScrolling || instance.Title != t.currentTitle {
+		return
+	}
+	t.fallback = false
+	t.content = content
+}
+
 // ensureSession creates or reuses a cached terminal tmux session for the given instance.
 func (t *TerminalPane) ensureSession(instance *session.Instance) error {
 	t.mu.Lock()

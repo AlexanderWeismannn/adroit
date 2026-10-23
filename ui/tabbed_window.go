@@ -30,10 +30,23 @@ func applyTabTheme() {
 		Background(highlightColor).
 		Foreground(theme.Color(theme.AccentText)).
 		Bold(true)
+	// Neither the top nor the bottom border is lipgloss's: the tab bar is the
+	// top and the status footer is the bottom, each a rule with words set into
+	// it, so the window pays no rows for chrome that says nothing.
 	windowStyle = lipgloss.NewStyle().
 		BorderForeground(highlightColor).
-		Border(lipgloss.RoundedBorder(), false, true, true, true)
+		Border(lipgloss.RoundedBorder(), false, true, false, true)
+	footerLiveStyle = lipgloss.NewStyle().Foreground(theme.Color(theme.Success))
+	footerPausedStyle = lipgloss.NewStyle().Foreground(theme.Color(theme.Warning))
 }
+
+// footerLiveStyle and footerPausedStyle colour the footer's one word the way
+// the list colours the same states: green is the live view, amber is a thing
+// waiting on you.
+var footerLiveStyle, footerPausedStyle lipgloss.Style
+
+// footerHeight is the rows the status footer takes: one, the bottom border.
+const footerHeight = 1
 
 const (
 	PreviewTab int = iota
@@ -150,7 +163,7 @@ func (w *TabbedWindow) SetSize(width, height int) {
 	// A terminal that is still opening can report fewer rows than that chrome
 	// takes, and a negative budget reached the panes: the preview sliced with it
 	// and panicked on the first frame. Nothing is left to draw, so draw nothing.
-	contentHeight := max(height-tabBarHeight-windowStyle.GetVerticalFrameSize()-1, 0)
+	contentHeight := max(height-tabBarHeight-footerHeight-windowStyle.GetVerticalFrameSize()-1, 0)
 	contentWidth := max(w.width-windowStyle.GetHorizontalFrameSize(), 0)
 
 	w.preview.SetSize(contentWidth, contentHeight)
@@ -198,6 +211,33 @@ func (w *TabbedWindow) UpdateRun(instance *session.Instance) error {
 		return nil
 	}
 	return w.run.UpdateContent(instance)
+}
+
+// SampleTerminal and SampleRun capture the pane a tab shows off the event loop;
+// ApplyTerminalSample and ApplyRunSample hand the result back on it. Each is a
+// no-op unless that tab is still the one showing, which is the only state the
+// tick samples in and the state it may no longer be in by the time the result
+// arrives.
+func (w *TabbedWindow) SampleTerminal(instance *session.Instance) (string, bool, error) {
+	return w.terminal.Sample(instance)
+}
+
+func (w *TabbedWindow) ApplyTerminalSample(instance *session.Instance, content string) {
+	if w.activeTab != TerminalTab {
+		return
+	}
+	w.terminal.ApplySample(instance, content)
+}
+
+func (w *TabbedWindow) SampleRun() (string, dev.Status, bool, error) {
+	return w.run.Sample()
+}
+
+func (w *TabbedWindow) ApplyRunSample(content string, status dev.Status) {
+	if w.activeTab != RunTab {
+		return
+	}
+	w.run.ApplySample(content, status)
 }
 
 // SelectRunTab makes the run tab active.
@@ -455,6 +495,79 @@ func (w *TabbedWindow) tabBar(width int) string {
 	return bar + tabRuleStyle.Render(strings.Repeat("─", fill)+"╮")
 }
 
+// paneStatus is the footer's one phrase: whether what the pane shows is the
+// live view, and if not, what it is instead and the key that brings the live
+// view back.
+//
+// A live pane and a stale one looked identical. A session parked by checkout,
+// a Terminal tab scrolled back into its history, a Run tab with the stack down
+// -- each was a still pane under the same border as a live one, and the only
+// way to tell was to wait and see whether anything moved.
+func (w *TabbedWindow) paneStatus() (text string, style lipgloss.Style) {
+	live := func() (string, lipgloss.Style) { return "● live", footerLiveStyle }
+	scrolled := func(back string) (string, lipgloss.Style) {
+		return "⇡ scrolled · esc " + back, tabLabelStyle
+	}
+	switch w.activeTab {
+	case PreviewTab:
+		// The preview pins its own status line under the scrollback while it is
+		// scrolled, with the position in it; the footer does not say it twice.
+		if w.instance == nil || w.preview.isScrolling || !w.instance.Started() {
+			return "", tabLabelStyle
+		}
+		if w.instance.Status == session.Paused {
+			return "⏸ paused · r resumes", footerPausedStyle
+		}
+		return live()
+	case DiffTab:
+		if w.diff.IsScrolling() {
+			return scrolled("returns to the top")
+		}
+	case TerminalTab:
+		if w.terminal.IsScrolling() {
+			return scrolled("returns to the live view")
+		}
+		if w.instance != nil && w.instance.Started() && w.instance.Status != session.Paused {
+			return live()
+		}
+	case RunTab:
+		if w.run.IsScrolling() {
+			return scrolled("returns to the live view")
+		}
+		if w.run.running() {
+			return live()
+		}
+	}
+	return "", tabLabelStyle
+}
+
+// footer draws the window's bottom border with the pane's status set into it,
+// exactly width cells wide:
+//
+//	╰─ ● live ──────────────────────────────────────────╯
+//
+// A status too long for the width is dropped rather than wrapped, for the same
+// reason the tab bar drops its labels: a second row takes the layout with it.
+func (w *TabbedWindow) footer(width int) string {
+	if width < 2 {
+		return ""
+	}
+	text, style := w.paneStatus()
+	label := ""
+	if text != "" {
+		label = " " + style.Render(text) + " "
+	}
+	// The corners and the one rule cell before the label: "╰─ ● live ──╯".
+	fill := width - 3 - lipgloss.Width(label)
+	if fill < 0 {
+		label, fill = "", width-3
+	}
+	if fill < 0 {
+		return clip(tabRuleStyle.Render("╰╯"), width)
+	}
+	return tabRuleStyle.Render("╰─") + label + tabRuleStyle.Render(strings.Repeat("─", fill)+"╯")
+}
+
 // compactCount shortens a line count for a badge: 980, 2.4k, 25k.
 func compactCount(n int) string {
 	switch {
@@ -486,12 +599,13 @@ func (w *TabbedWindow) String() string {
 	}
 	window := windowStyle.Render(
 		lipgloss.Place(
-			w.width, w.height-1-windowStyle.GetVerticalFrameSize()-tabBarHeight,
+			w.width, w.height-1-windowStyle.GetVerticalFrameSize()-tabBarHeight-footerHeight,
 			lipgloss.Left, lipgloss.Top, content))
+	footer := w.footer(w.width + windowStyle.GetHorizontalFrameSize())
 
 	// One blank row above the tabs, matching the single row the list leads with,
 	// so the two panes start level. A bare "\n" is two rows, not one.
-	composed := lipgloss.JoinVertical(lipgloss.Left, "", row, window)
+	composed := lipgloss.JoinVertical(lipgloss.Left, "", row, window, footer)
 
 	// The window is a fixed-size pane, so it must occupy exactly the rows it was
 	// given. A pane whose content does not fit -- the splash in a short terminal

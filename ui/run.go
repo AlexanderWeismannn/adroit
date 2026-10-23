@@ -138,6 +138,43 @@ func (d *RunPane) UpdateContent(instance *session.Instance) error {
 	return nil
 }
 
+// Sample reads the stack's state and pane off the event loop. ok is false when
+// there is nothing to sample: no stack, or the pane in scroll mode.
+func (d *RunPane) Sample() (content string, status dev.Status, ok bool, err error) {
+	d.mu.Lock()
+	stack, scrolling := d.stack, d.isScrolling
+	d.mu.Unlock()
+	if stack == nil || scrolling {
+		return "", dev.Status{}, false, nil
+	}
+	status = stack.Snapshot()
+	content, err = stack.Capture()
+	if err != nil {
+		return "", status, false, fmt.Errorf("run pane: failed to capture stack output: %w", err)
+	}
+	return content, status, true, nil
+}
+
+// ApplySample hands the pane what Sample read, unless scroll mode was entered
+// meanwhile -- a capture would scroll the view out from under the reader.
+func (d *RunPane) ApplySample(content string, status dev.Status) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.isScrolling {
+		return
+	}
+	d.status = status
+	d.content = content
+}
+
+// running reports whether the pane is showing a stack that is up, off the
+// status the last sample read.
+func (d *RunPane) running() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.stack != nil && d.status.Running
+}
+
 func (d *RunPane) String() string {
 	d.mu.Lock()
 	defer d.mu.Unlock()
