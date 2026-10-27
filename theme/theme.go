@@ -16,6 +16,22 @@ import (
 )
 
 // Role names a colour by what it means rather than by where it is used.
+//
+// This is the whole contract between the interface and a theme: every colour
+// the interface draws is one of these roles, resolved through Color, and a
+// theme is a value for each of them on a light and a dark background. Nothing
+// outside this package names a colour (internal/boundary pins that), so a
+// palette can be swapped, previewed or overridden in one place.
+//
+// How the roles are used:
+//
+//	Text          ordinary text                    Muted      secondary text; the unfocused border
+//	Accent        the focused border, the active   AccentText text drawn on Accent
+//	              tab, keys, titles
+//	Success       live, passing, added, approved   Danger     failing, removed, errors, conflicts
+//	Warning       waiting on you, running, behind  Info       diff hunks, help headings
+//	Special       a merged pull request            Subtle     rules and separators, present not read
+//	SelectionBg   the selected row's band          SelectionFg text on it
 type Role string
 
 const (

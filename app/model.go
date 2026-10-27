@@ -20,12 +20,22 @@ import (
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 const GlobalInstanceLimit = 10
 
 // Run is the main entrypoint into the application.
 func Run(ctx context.Context, program string, autoYes bool) error {
+	// The light/dark half of every colour is chosen by the terminal's answer to
+	// the background query. A terminal that does not answer -- a sandbox, some
+	// multiplexer set-ups -- is taken as dark; this says otherwise.
+	switch os.Getenv("ADROIT_BACKGROUND") {
+	case "light":
+		lipgloss.SetHasDarkBackground(false)
+	case "dark":
+		lipgloss.SetHasDarkBackground(true)
+	}
 	h := newHome(ctx, program, autoYes)
 	p := tea.NewProgram(
 		maybeProfiled(h),
