@@ -2,18 +2,19 @@ package session
 
 import (
 	"fmt"
-	"github.com/AlexanderWeismannn/adroit/cmd/cmd_test"
-	"github.com/AlexanderWeismannn/adroit/config"
-	"github.com/AlexanderWeismannn/adroit/log"
-	"github.com/AlexanderWeismannn/adroit/session/git"
-	"github.com/AlexanderWeismannn/adroit/session/resume"
-	"github.com/AlexanderWeismannn/adroit/session/tmux"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/AlexanderWeismannn/adroit/cmd/cmd_test"
+	"github.com/AlexanderWeismannn/adroit/config"
+	"github.com/AlexanderWeismannn/adroit/log"
+	"github.com/AlexanderWeismannn/adroit/session/git"
+	"github.com/AlexanderWeismannn/adroit/session/resume"
+	"github.com/AlexanderWeismannn/adroit/session/tmux"
 
 	"github.com/stretchr/testify/require"
 )

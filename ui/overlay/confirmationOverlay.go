@@ -1,9 +1,11 @@
 package overlay
 
 import (
+	"image/color"
+
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/AlexanderWeismannn/adroit/theme"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 )
 
 // ConfirmationOverlay represents a confirmation dialog overlay
@@ -28,7 +30,7 @@ type ConfirmationOverlay struct {
 	// Custom cancel key (defaults to 'n')
 	CancelKey string
 	// Custom styling options
-	borderColor lipgloss.TerminalColor
+	borderColor color.Color
 }
 
 // NewConfirmationOverlay creates a new confirmation dialog overlay with the given message
@@ -48,7 +50,7 @@ func NewConfirmationOverlay(message string) *ConfirmationOverlay {
 
 // HandleKeyPress processes a key press and updates the state
 // Returns true if the overlay should be closed
-func (c *ConfirmationOverlay) HandleKeyPress(msg tea.KeyMsg) bool {
+func (c *ConfirmationOverlay) HandleKeyPress(msg tea.KeyPressMsg) bool {
 	switch msg.String() {
 	case c.ConfirmKey:
 		c.Dismissed = true
@@ -83,7 +85,7 @@ func (c *ConfirmationOverlay) SetWidth(width int) {
 }
 
 // SetBorderColor sets the border color of the confirmation overlay
-func (c *ConfirmationOverlay) SetBorderColor(color lipgloss.TerminalColor) {
+func (c *ConfirmationOverlay) SetBorderColor(color color.Color) {
 	c.borderColor = color
 }
 

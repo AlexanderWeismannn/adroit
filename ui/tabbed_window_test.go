@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 
 	"github.com/AlexanderWeismannn/adroit/session"
 	"github.com/AlexanderWeismannn/adroit/session/dev"
@@ -49,7 +49,7 @@ func TestSelectRunTabIsTheTabTheWindowReports(t *testing.T) {
 	require.Equal(t, RunTab, w.GetActiveTab())
 
 	w.SetSize(120, 40)
-	require.Contains(t, w.String(), "Run", "the run tab must be drawn in the tab bar")
+	require.Contains(t, plain(w.String()), "Run", "the run tab must be drawn in the tab bar")
 }
 
 // Toggle has to reach the run tab, or the only way in is the key that starts a

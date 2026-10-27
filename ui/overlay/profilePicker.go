@@ -6,8 +6,8 @@ import (
 	"github.com/AlexanderWeismannn/adroit/config"
 	"github.com/AlexanderWeismannn/adroit/theme"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // ProfilePicker is an embeddable component for selecting a profile.
@@ -43,8 +43,8 @@ func (pp *ProfilePicker) SetWidth(w int) {
 }
 
 // HandleKeyPress processes a key event. Returns true if consumed.
-func (pp *ProfilePicker) HandleKeyPress(msg tea.KeyMsg) bool {
-	switch msg.Type {
+func (pp *ProfilePicker) HandleKeyPress(msg tea.KeyPressMsg) bool {
+	switch msg.Code {
 	case tea.KeyLeft:
 		if pp.cursor > 0 {
 			pp.cursor--

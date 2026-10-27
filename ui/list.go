@@ -3,6 +3,7 @@ package ui
 import (
 	"errors"
 	"fmt"
+	"image/color"
 	"path/filepath"
 	"strings"
 	"time"
@@ -15,9 +16,9 @@ import (
 	"github.com/AlexanderWeismannn/adroit/session/upstream"
 	"github.com/AlexanderWeismannn/adroit/theme"
 
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/mattn/go-runewidth"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // The state glyph is the first column of every row, one cell wide, so the
@@ -143,7 +144,7 @@ var needsInputChipStyle, unseenStyle lipgloss.Style
 // The selected row's colours are their own pair of roles rather than a shade of
 // the accent: they have to contrast with each other, which no single hue can
 // guarantee across every theme.
-var selectedBg, selectedFg, selectionAccent lipgloss.TerminalColor
+var selectedBg, selectedFg, selectionAccent color.Color
 
 // Left padding drops to 0 where the border is added, so the bar occupies the
 // column the padding used to and the row's total width is unchanged — the
@@ -416,7 +417,7 @@ var namingPlaceholderStyle, namingCursorStyle, ageStyle lipgloss.Style
 // in a reset, so everything after it -- including that padding -- falls back to
 // the terminal's own background: a dark bar running from the styled span to the
 // end of an otherwise highlighted row.
-func padTo(s string, width int, bg lipgloss.TerminalColor) string {
+func padTo(s string, width int, bg color.Color) string {
 	pad := width - lipgloss.Width(s)
 	if pad <= 0 {
 		return s
@@ -449,7 +450,7 @@ const minBranchWidth = 6
 // permanently squeezed, and a session on branch "zebra" silently lost its build
 // verdict and its remote counts on a pane with sixty columns to spare.
 func branchSquashed(branch string, column int) bool {
-	need := runewidth.StringWidth(branch)
+	need := ansi.StringWidth(branch)
 	if need > minBranchWidth {
 		need = minBranchWidth
 	}
@@ -459,7 +460,7 @@ func branchSquashed(branch string, column int) bool {
 // visibleBranchWidth reports how many characters of a branch name survive in a
 // column of the given width, mirroring the truncation Render applies below.
 func visibleBranchWidth(branch string, column int) int {
-	width := runewidth.StringWidth(branch)
+	width := ansi.StringWidth(branch)
 	switch {
 	case column >= width:
 		return width
@@ -508,7 +509,7 @@ func prMarker(status ci.Status) (icon, label string, style lipgloss.Style) {
 // The two halves must stay in step: plain is what the caller subtracts from the
 // branch name's width budget, so any span added to styled has to be added to
 // plain too, or the row overflows its pane.
-func ciBadge(status ci.Status, bg lipgloss.TerminalColor, labelled bool) (plain, styled string) {
+func ciBadge(status ci.Status, bg color.Color, labelled bool) (plain, styled string) {
 	if labelled {
 		return ciBadgeAt(status, bg, badgeWordsAll)
 	}
@@ -526,7 +527,7 @@ const (
 	badgeWordsAll     = 3 // and "comments"
 )
 
-func ciBadgeAt(status ci.Status, bg lipgloss.TerminalColor, words int) (plain, styled string) {
+func ciBadgeAt(status ci.Status, bg color.Color, words int) (plain, styled string) {
 	var icon, label string
 	var style lipgloss.Style
 
@@ -618,7 +619,7 @@ func feedbackMarker(status ci.Status) (icon string, style lipgloss.Style) {
 // the code on screen is not the code on the branch. Ahead alone is dim: it is
 // the normal condition of a session mid-task, and colouring it would nag about
 // every unpushed commit.
-func syncBadge(status upstream.Status, bg lipgloss.TerminalColor, labelled bool) (plain, styled string) {
+func syncBadge(status upstream.Status, bg color.Color, labelled bool) (plain, styled string) {
 	label := func(text, word string) string {
 		if labelled {
 			return text + " " + word
@@ -676,33 +677,33 @@ const elision = "…"
 // counting characters. The head places the name, the tail says which one it is,
 // and both survive this.
 func elideMiddle(s string, width int) string {
-	full := runewidth.StringWidth(s)
+	full := ansi.StringWidth(s)
 	if width <= 0 {
 		return ""
 	}
 	if full <= width {
 		return s
 	}
-	mark := runewidth.StringWidth(elision)
+	mark := ansi.StringWidth(elision)
 	if width <= mark {
-		return runewidth.Truncate(s, width, "")
+		return ansi.Truncate(s, width, "")
 	}
 	// The head keeps the odd column: a name is read from the front, and with two
 	// characters to give away the first is worth more than the last.
 	room := width - mark
 	for tail := room / 2; tail >= 0; tail-- {
-		out := runewidth.Truncate(s, room-tail, "") + elision
+		out := ansi.Truncate(s, room-tail, "") + elision
 		if tail > 0 {
-			out += runewidth.TruncateLeft(s, full-tail, "")
+			out += ansi.TruncateLeft(s, full-tail, "")
 		}
 		// A double-width rune straddling either cut can overshoot the budget by a
 		// column. Give the tail back a character rather than the whole row a
 		// misaligned edge.
-		if runewidth.StringWidth(out) <= width {
+		if ansi.StringWidth(out) <= width {
 			return out
 		}
 	}
-	return runewidth.Truncate(s, width, "")
+	return ansi.Truncate(s, width, "")
 }
 
 // shortAge renders how long a session has been quiet, in the fewest characters
@@ -727,7 +728,7 @@ func shortAge(d time.Duration) string {
 //
 // Only on a row that has stopped. A spinning row is saying "now" already, and
 // the number would be a second stale by the time it was read.
-func (r *InstanceRenderer) rowAge(i *session.Instance, beingNamed bool, bg lipgloss.TerminalColor) (string, int) {
+func (r *InstanceRenderer) rowAge(i *session.Instance, beingNamed bool, bg color.Color) (string, int) {
 	if beingNamed || i.Status == session.Loading || i.Status == session.Running {
 		return "", 0
 	}
@@ -744,13 +745,13 @@ func (r *InstanceRenderer) rowAge(i *session.Instance, beingNamed bool, bg lipgl
 		return "", 0
 	}
 	age = " " + age
-	return ageStyle.Background(bg).Render(age), runewidth.StringWidth(age)
+	return ageStyle.Background(bg).Render(age), ansi.StringWidth(age)
 }
 
 // devBadge renders the development-stack mark for a row, and the width it costs.
 // The width is returned separately because the styled string carries ANSI codes
 // that runewidth would count as printable.
-func (r *InstanceRenderer) devBadge(i *session.Instance, bg lipgloss.TerminalColor) (string, int) {
+func (r *InstanceRenderer) devBadge(i *session.Instance, bg color.Color) (string, int) {
 	if r.devStackTitle == "" || r.devStackTitle != i.Title {
 		return "", 0
 	}
@@ -763,13 +764,13 @@ func (r *InstanceRenderer) devBadge(i *session.Instance, bg lipgloss.TerminalCol
 	case dev.LampDown:
 		style, glyph = removedLinesStyle, lampDownGlyph
 	}
-	return style.Background(bg).Render(glyph), runewidth.StringWidth(glyph)
+	return style.Background(bg).Render(glyph), ansi.StringWidth(glyph)
 }
 
 // stateGlyph is the first column of a row: one glyph and a space, saying what
 // the session is doing. The busy verb -- "resuming", "checking out" -- goes at
 // the right-hand end of the title line; here the glyph spins.
-func (r *InstanceRenderer) stateGlyph(i *session.Instance, beingNamed, selected bool, bg lipgloss.TerminalColor) string {
+func (r *InstanceRenderer) stateGlyph(i *session.Instance, beingNamed, selected bool, bg color.Color) string {
 	paint := func(style lipgloss.Style, glyph string) string {
 		return style.Background(bg).Render(glyph)
 	}
@@ -845,13 +846,13 @@ func (r *InstanceRenderer) stateGlyph(i *session.Instance, beingNamed, selected 
 
 // busyMark is the verb of an action in flight, for the right-hand end of the
 // title line, and its width.
-func (r *InstanceRenderer) busyMark(i *session.Instance, bg lipgloss.TerminalColor) (string, int) {
+func (r *InstanceRenderer) busyMark(i *session.Instance, bg color.Color) (string, int) {
 	doing, ok := r.busy[i]
 	if !ok {
 		return "", 0
 	}
 	mark := doing + " "
-	return workingStyle.Background(bg).Render(mark), runewidth.StringWidth(mark)
+	return workingStyle.Background(bg).Render(mark), ansi.StringWidth(mark)
 }
 
 // RenderCompact draws a session on one line, for the compact mode and the
@@ -895,15 +896,15 @@ func (r *InstanceRenderer) compactAt(i *session.Instance, selected bool, isLast 
 		add(dev, w)
 	}
 	if plain, styled := ciBadgeAt(i.GetCIStatus(), bg, badgeWordsNone); plain != "" {
-		add(styled, runewidth.StringWidth(plain))
+		add(styled, ansi.StringWidth(plain))
 	}
 	if plain, styled := syncBadge(i.GetUpstreamStatus(), bg, false); plain != "" {
-		add(styled, runewidth.StringWidth(plain))
+		add(styled, ansi.StringWidth(plain))
 	}
 	if st := i.GetDiffStats(); st != nil && st.Error == nil && !st.IsEmpty() {
 		plain := "+" + compactCount(st.Added) + " -" + compactCount(st.Removed)
 		add(addedLinesStyle.Background(bg).Render("+"+compactCount(st.Added))+paint(" ")+
-			removedLinesStyle.Background(bg).Render("-"+compactCount(st.Removed)), runewidth.StringWidth(plain))
+			removedLinesStyle.Background(bg).Render("-"+compactCount(st.Removed)), ansi.StringWidth(plain))
 	}
 	if age, w := r.rowAge(i, beingNamed, bg); w > 0 {
 		marks = append(marks, age) // rowAge carries its own leading space
@@ -927,12 +928,12 @@ func (r *InstanceRenderer) compactAt(i *session.Instance, selected bool, isLast 
 	}
 	cursor := 0
 	if beingNamed {
-		cursor = runewidth.StringWidth(namingCursor)
+		cursor = ansi.StringWidth(namingCursor)
 	}
-	titleWidth := runewidth.StringWidth(titleText) + cursor
+	titleWidth := ansi.StringWidth(titleText) + cursor
 	branchCell := 0
 	if branch != "" {
-		branchCell = 2 + 2 + runewidth.StringWidth(branch) // two spaces, the glyph and its space
+		branchCell = 2 + 2 + ansi.StringWidth(branch) // two spaces, the glyph and its space
 	}
 	if titleWidth+branchCell > width {
 		// The branch gives way first, then the title is cut.
@@ -941,7 +942,7 @@ func (r *InstanceRenderer) compactAt(i *session.Instance, selected bool, isLast 
 			branch, branchCell = "", 0
 		} else {
 			branch = elideMiddle(branch, room-4)
-			branchCell = 4 + runewidth.StringWidth(branch)
+			branchCell = 4 + ansi.StringWidth(branch)
 		}
 	}
 	if titleWidth > width-branchCell && width-branchCell-cursor > 0 {
@@ -1034,9 +1035,9 @@ func (r *InstanceRenderer) Render(i *session.Instance, idx int, selected bool, h
 	widthAvail := r.width - lead - busyWidth - devMarkWidth - 1
 	if beingNamed {
 		// The cursor sits after the text and has to fit beside it.
-		widthAvail -= runewidth.StringWidth(namingCursor)
+		widthAvail -= ansi.StringWidth(namingCursor)
 	}
-	if widthAvail > 0 && runewidth.StringWidth(titleText) > widthAvail {
+	if widthAvail > 0 && ansi.StringWidth(titleText) > widthAvail {
 		titleText = elideMiddle(titleText, widthAvail)
 	}
 	if showPlaceholder {
@@ -1085,12 +1086,12 @@ func (r *InstanceRenderer) Render(i *session.Instance, idx int, selected bool, h
 	}
 
 	remainingWidth := r.width
-	remainingWidth -= runewidth.StringWidth(prefix)
-	remainingWidth -= runewidth.StringWidth(branchIcon) // same width as repoIcon
-	remainingWidth -= 2                                 // for the literal " " and "-" in the branchLine format string
-	remainingWidth -= ageWidth                          // the quiet-for mark at the end of the line
+	remainingWidth -= ansi.StringWidth(prefix)
+	remainingWidth -= ansi.StringWidth(branchIcon) // same width as repoIcon
+	remainingWidth -= 2                            // for the literal " " and "-" in the branchLine format string
+	remainingWidth -= ageWidth                     // the quiet-for mark at the end of the line
 
-	diffWidth := runewidth.StringWidth(addedDiff) + runewidth.StringWidth(removedDiff)
+	diffWidth := ansi.StringWidth(addedDiff) + ansi.StringWidth(removedDiff)
 	if diffWidth > 0 {
 		diffWidth += 1
 	}
@@ -1144,7 +1145,7 @@ func (r *InstanceRenderer) Render(i *session.Instance, idx int, selected bool, h
 			// state, and the width the icon would have taken stays spent so the
 			// line starts in the same column as every other row's.
 			branch, pendingBranch = notStartedNote, true
-			rowIcon = strings.Repeat(" ", runewidth.StringWidth(rowIcon))
+			rowIcon = strings.Repeat(" ", ansi.StringWidth(rowIcon))
 		}
 		branchIsEcho = false
 	}
@@ -1185,7 +1186,7 @@ func (r *InstanceRenderer) Render(i *session.Instance, idx int, selected bool, h
 	// would be paying for the explanation with the thing being explained.
 	badges := func(words int) (ciStyled string, ciWidth int, syncStyled string, syncWidth int) {
 		ciPlain, ciStyled := ciBadgeAt(i.GetCIStatus(), descS.GetBackground(), words)
-		ciWidth = runewidth.StringWidth(ciPlain)
+		ciWidth = ansi.StringWidth(ciPlain)
 		if ciWidth > 0 {
 			ciWidth += 2 // the spaces either side of the badge in branchLine
 		}
@@ -1196,7 +1197,7 @@ func (r *InstanceRenderer) Render(i *session.Instance, idx int, selected bool, h
 		// Its word goes last of all, with the verdict's: it is the one that says
 		// the rest of the line describes the wrong commit.
 		syncPlain, syncStyled := syncBadge(i.GetUpstreamStatus(), descS.GetBackground(), words >= badgeWordsVerdict)
-		syncWidth = runewidth.StringWidth(syncPlain)
+		syncWidth = ansi.StringWidth(syncPlain)
 		if syncWidth > 0 {
 			syncWidth++ // the space before the badge in branchLine
 		}
@@ -1206,7 +1207,7 @@ func (r *InstanceRenderer) Render(i *session.Instance, idx int, selected bool, h
 	// The words are affordable only when nothing has to be cut to fit them.
 	ciStyled, ciWidth, syncStyled, syncWidth := badges(badgeWordsAll)
 	for words := badgeWordsAll - 1; words >= badgeWordsNone &&
-		runewidth.StringWidth(branch)+ciWidth+syncWidth > remainingWidth; words-- {
+		ansi.StringWidth(branch)+ciWidth+syncWidth > remainingWidth; words-- {
 		ciStyled, ciWidth, syncStyled, syncWidth = badges(words)
 	}
 	// Up to a point: the branch name is the row's identity and the badge is an
@@ -1226,7 +1227,7 @@ func (r *InstanceRenderer) Render(i *session.Instance, idx int, selected bool, h
 	remainingWidth -= ciWidth + syncWidth
 
 	// Don't show branch if there's no space for it. Or show ellipsis if it's too long.
-	branchWidth := runewidth.StringWidth(branch)
+	branchWidth := ansi.StringWidth(branch)
 	if remainingWidth < 0 {
 		branch = ""
 	} else if remainingWidth < branchWidth {
@@ -1236,7 +1237,7 @@ func (r *InstanceRenderer) Render(i *session.Instance, idx int, selected bool, h
 			branch = elideMiddle(branch, remainingWidth)
 		}
 	}
-	remainingWidth -= runewidth.StringWidth(branch)
+	remainingWidth -= ansi.StringWidth(branch)
 
 	// Add spaces to fill the remaining width. Painted, because the hint below may
 	// have put a style -- and so a reset -- immediately before them.
@@ -1276,7 +1277,7 @@ func (r *InstanceRenderer) Render(i *session.Instance, idx int, selected bool, h
 	// stats sit in the same column as they do on every other row. Reclaiming it
 	// would make a row shift sideways for no reason the eye can attribute.
 	if branch == "" {
-		rowIcon = strings.Repeat(" ", runewidth.StringWidth(rowIcon))
+		rowIcon = strings.Repeat(" ", ansi.StringWidth(rowIcon))
 	}
 
 	// A space after the branch glyph, not a hyphen: "Ꮧ-TASK-5636" reads as though

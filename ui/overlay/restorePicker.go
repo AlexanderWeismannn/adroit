@@ -7,8 +7,8 @@ import (
 
 	"github.com/AlexanderWeismannn/adroit/theme"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // RestoreEntry is one killed session offered back to the user.
@@ -60,8 +60,8 @@ func (r *RestorePicker) SetWidth(width int) {
 	}
 }
 
-func (r *RestorePicker) HandleKeyPress(msg tea.KeyMsg) PickerAction {
-	switch msg.Type {
+func (r *RestorePicker) HandleKeyPress(msg tea.KeyPressMsg) PickerAction {
+	switch msg.Code {
 	case tea.KeyUp:
 		return r.move(-1)
 	case tea.KeyDown:
@@ -71,10 +71,11 @@ func (r *RestorePicker) HandleKeyPress(msg tea.KeyMsg) PickerAction {
 			return PickerCancel
 		}
 		return PickerConfirm
-	case tea.KeyEsc:
+	case tea.KeyEscape:
 		return PickerCancel
-	case tea.KeyRunes:
-		switch string(msg.Runes) {
+	}
+	if msg.Text != "" && msg.Mod == 0 {
+		switch msg.Text {
 		case "k":
 			return r.move(-1)
 		case "j":

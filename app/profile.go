@@ -11,7 +11,7 @@ import (
 
 	"github.com/AlexanderWeismannn/adroit/log"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // Profiling is off unless asked for, and asked for by environment rather than
@@ -137,7 +137,7 @@ func (m profiled) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m profiled) View() string {
+func (m profiled) View() tea.View {
 	start := time.Now()
 	s := m.inner.View()
 	m.p.view(time.Since(start))

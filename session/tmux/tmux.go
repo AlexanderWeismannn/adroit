@@ -6,8 +6,6 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
-	"github.com/AlexanderWeismannn/adroit/cmd"
-	"github.com/AlexanderWeismannn/adroit/log"
 	"io"
 	"os"
 	"os/exec"
@@ -16,6 +14,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/AlexanderWeismannn/adroit/cmd"
+	"github.com/AlexanderWeismannn/adroit/log"
 
 	"github.com/creack/pty"
 	"github.com/muesli/cancelreader"

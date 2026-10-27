@@ -15,15 +15,19 @@ import (
 	"github.com/AlexanderWeismannn/adroit/session"
 	"github.com/AlexanderWeismannn/adroit/session/dev"
 	"github.com/AlexanderWeismannn/adroit/session/git"
+	"github.com/AlexanderWeismannn/adroit/theme"
 	"github.com/AlexanderWeismannn/adroit/ui"
 	"github.com/AlexanderWeismannn/adroit/ui/overlay"
 
-	"github.com/charmbracelet/bubbles/spinner"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/spinner"
+	tea "charm.land/bubbletea/v2"
 )
 
 const GlobalInstanceLimit = 10
+
+// backgroundForced is whether ADROIT_BACKGROUND chose the background, in which
+// case the terminal's own answer is not applied.
+var backgroundForced bool
 
 // Run is the main entrypoint into the application.
 func Run(ctx context.Context, program string, autoYes bool) error {
@@ -32,15 +36,15 @@ func Run(ctx context.Context, program string, autoYes bool) error {
 	// multiplexer set-ups -- is taken as dark; this says otherwise.
 	switch os.Getenv("ADROIT_BACKGROUND") {
 	case "light":
-		lipgloss.SetHasDarkBackground(false)
+		theme.SetDark(false)
+		backgroundForced = true
 	case "dark":
-		lipgloss.SetHasDarkBackground(true)
+		theme.SetDark(true)
+		backgroundForced = true
 	}
 	h := newHome(ctx, program, autoYes)
 	p := tea.NewProgram(
 		maybeProfiled(h),
-		tea.WithAltScreen(),
-		tea.WithMouseCellMotion(),  // Mouse scroll
 		tea.WithoutSignalHandler(), // see handleTermination
 	)
 	defer handleTermination(p, h.terminating)()
@@ -369,6 +373,7 @@ func (m *home) Init() tea.Cmd {
 	}
 	return tea.Batch(
 		notice,
+		tea.RequestBackgroundColor,
 		m.spinner.Tick,
 		m.paneTick(),
 		tickUpdateMetadataCmd(m.planMetadata(m.snapshotActiveInstances()),
@@ -378,6 +383,13 @@ func (m *home) Init() tea.Cmd {
 
 func (m *home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.BackgroundColorMsg:
+		// The terminal's answer to Init's question: which half of every colour
+		// pair to draw with. Ignored when ADROIT_BACKGROUND already said.
+		if !backgroundForced {
+			theme.SetDark(msg.IsDark())
+		}
+		return m, nil
 	case terminateMsg:
 		// Unlike q, a save that fails does not stop the quit: whoever sent the
 		// signal is not looking at the error box.
@@ -391,9 +403,9 @@ func (m *home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// terminal may have been resized while we were not watching.
 		m.overlay = nil
 		if msg.err != nil {
-			return m, tea.Batch(tea.WindowSize(), m.handleError(msg.err))
+			return m, tea.Batch(tea.RequestWindowSize, m.handleError(msg.err))
 		}
-		return m, tea.Batch(tea.WindowSize(), m.instanceChanged())
+		return m, tea.Batch(tea.RequestWindowSize, m.instanceChanged())
 	case hideErrMsg:
 		// Only the timer of the message on screen may clear it. Every message
 		// starts its own, so an earlier one's used to wipe a newer message early.
@@ -527,22 +539,17 @@ func (m *home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(m.instanceChanged(), m.handleError(msg.err))
 		}
 		return m, m.instanceChanged()
-	case tea.MouseMsg:
-		// Handle mouse wheel events for scrolling the diff/preview pane
-		if msg.Action == tea.MouseActionPress {
-			if msg.Button == tea.MouseButtonWheelDown || msg.Button == tea.MouseButtonWheelUp {
-				selected := m.list.GetSelectedInstance()
-				if selected == nil || selected.Status == session.Paused {
-					return m, nil
-				}
-
-				switch msg.Button {
-				case tea.MouseButtonWheelUp:
-					m.tabbedWindow.ScrollUp()
-				case tea.MouseButtonWheelDown:
-					m.tabbedWindow.ScrollDown()
-				}
-			}
+	case tea.MouseWheelMsg:
+		// The wheel scrolls the diff/preview pane.
+		selected := m.list.GetSelectedInstance()
+		if selected == nil || selected.Status == session.Paused {
+			return m, nil
+		}
+		switch msg.Button {
+		case tea.MouseWheelUp:
+			m.tabbedWindow.ScrollUp()
+		case tea.MouseWheelDown:
+			m.tabbedWindow.ScrollDown()
 		}
 		return m, nil
 	case branchSearchDebounceMsg:
@@ -560,7 +567,7 @@ func (m *home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			input.SetBranchResults(msg.branches, msg.version)
 		}
 		return m, nil
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		return m.handleKeyPress(msg)
 	case tea.WindowSizeMsg:
 		m.updateHandleWindowSizeEvent(msg)
@@ -611,7 +618,7 @@ func (m *home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if err := m.storage.SaveInstances(m.list.GetInstances()); err != nil {
 			return m, m.handleError(err)
 		}
-		return m, tea.Batch(tea.WindowSize(), m.instanceChanged(), notice)
+		return m, tea.Batch(tea.RequestWindowSize, m.instanceChanged(), notice)
 	case overlay.SettingsCheckMsg:
 		if s, ok := m.overlay.(*settingsScreen); ok {
 			s.settings.HandleCheck(msg)
@@ -671,7 +678,7 @@ func (m *home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.showHelpScreen(helpStart(msg.instance), nil)
 		}
 
-		return m, tea.Batch(tea.WindowSize(), m.instanceChanged())
+		return m, tea.Batch(tea.RequestWindowSize, m.instanceChanged())
 	case spinner.TickMsg:
 		if !m.spinnerNeeded() {
 			m.spinnerRunning = false

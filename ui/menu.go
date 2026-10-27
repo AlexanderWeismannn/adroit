@@ -9,8 +9,8 @@ import (
 	"github.com/AlexanderWeismannn/adroit/session"
 	"github.com/AlexanderWeismannn/adroit/session/ci"
 
-	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/reflow/truncate"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 var keyStyle, descStyle, sepStyle lipgloss.Style
@@ -349,7 +349,7 @@ func (m *Menu) String() string {
 	// Even keys alone overflow a narrow enough terminal. Cut rather than let it
 	// wrap: a wrapped bar takes its second row from the panes above it.
 	if m.width > 0 && lipgloss.Width(rendered) > m.width {
-		rendered = truncate.StringWithTail(rendered, uint(m.width), "…")
+		rendered = ansi.Truncate(rendered, m.width, "…")
 	}
 
 	return lipgloss.Place(m.width, m.height, lipgloss.Left, lipgloss.Center, rendered)

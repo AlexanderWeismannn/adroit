@@ -16,12 +16,13 @@ package upstream
 import (
 	"context"
 	"fmt"
-	"github.com/AlexanderWeismannn/adroit/cmd"
 	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/AlexanderWeismannn/adroit/cmd"
 
 	"github.com/AlexanderWeismannn/adroit/log"
 )

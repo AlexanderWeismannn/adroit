@@ -13,7 +13,7 @@ import (
 	"github.com/AlexanderWeismannn/adroit/ui"
 	"github.com/AlexanderWeismannn/adroit/ui/overlay"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // Killing a session destroys its worktree and its branch, and there is no
@@ -181,7 +181,7 @@ func (m *home) restoreSession(record config.KilledSession) (tea.Model, tea.Cmd) 
 		err := instance.Start(true)
 		return instanceStartedMsg{instance: instance, err: err}
 	}
-	return m, tea.Batch(tea.WindowSize(), m.instanceChanged(), startCmd)
+	return m, tea.Batch(tea.RequestWindowSize, m.instanceChanged(), startCmd)
 }
 
 // uniqueTitle keeps a restored session from colliding with one already in the

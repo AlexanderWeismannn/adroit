@@ -2,12 +2,13 @@ package git
 
 import (
 	"fmt"
-	"github.com/AlexanderWeismannn/adroit/config"
-	"github.com/AlexanderWeismannn/adroit/log"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/AlexanderWeismannn/adroit/config"
+	"github.com/AlexanderWeismannn/adroit/log"
 )
 
 func getWorktreeDirectory() (string, error) {

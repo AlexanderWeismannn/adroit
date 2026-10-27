@@ -8,8 +8,8 @@ import (
 	"github.com/AlexanderWeismannn/adroit/session"
 	"github.com/AlexanderWeismannn/adroit/theme"
 
-	"github.com/charmbracelet/bubbles/viewport"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/viewport"
+	"charm.land/lipgloss/v2"
 )
 
 var previewPaneStyle, previewFooterStyle, pausedNoticeStyle lipgloss.Style
@@ -60,7 +60,7 @@ type previewState struct {
 
 func NewPreviewPane() *PreviewPane {
 	return &PreviewPane{
-		viewport: viewport.New(0, 0),
+		viewport: viewport.New(),
 	}
 }
 
@@ -68,8 +68,8 @@ func (p *PreviewPane) SetSize(width, maxHeight int) {
 	width, maxHeight = max(width, 0), max(maxHeight, 0)
 	p.width = width
 	p.height = maxHeight
-	p.viewport.Width = width
-	p.viewport.Height = p.viewportHeight()
+	p.viewport.SetWidth(width)
+	p.viewport.SetHeight(p.viewportHeight())
 }
 
 // viewportHeight is the rows the scrollback gets: all of them, less the status
@@ -249,7 +249,7 @@ func (p *PreviewPane) enterScrolling(instance *session.Instance) error {
 	}
 
 	p.isScrolling = true
-	p.viewport.Height = p.viewportHeight()
+	p.viewport.SetHeight(p.viewportHeight())
 	p.viewport.SetContent(content)
 	p.viewport.GotoBottom()
 	return nil
@@ -263,7 +263,7 @@ func (p *PreviewPane) exitScrolling() {
 		return
 	}
 	p.isScrolling = false
-	p.viewport.Height = p.viewportHeight()
+	p.viewport.SetHeight(p.viewportHeight())
 	p.viewport.SetContent("")
 	p.viewport.GotoTop()
 }
@@ -375,7 +375,7 @@ func (p *PreviewPane) ScrollUp(instance *session.Instance) error {
 	}
 
 	// Already in scroll mode, just scroll the viewport
-	p.viewport.LineUp(1)
+	p.viewport.ScrollUp(1)
 	return nil
 }
 
@@ -390,7 +390,7 @@ func (p *PreviewPane) ScrollDown(instance *session.Instance) error {
 	}
 
 	// Already in copy mode, just scroll the viewport
-	p.viewport.LineDown(1)
+	p.viewport.ScrollDown(1)
 	return nil
 }
 

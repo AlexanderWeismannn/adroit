@@ -2,7 +2,6 @@ package tmux
 
 import (
 	"fmt"
-	cmd2 "github.com/AlexanderWeismannn/adroit/cmd"
 	"math/rand"
 	"os"
 	"os/exec"
@@ -12,11 +11,13 @@ import (
 	"testing"
 	"time"
 
+	cmd2 "github.com/AlexanderWeismannn/adroit/cmd"
+
 	"github.com/AlexanderWeismannn/adroit/cmd/cmd_test"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/creack/pty"
-	"github.com/muesli/ansi"
 	"github.com/stretchr/testify/require"
 )
 
@@ -351,13 +352,16 @@ func TestStripTerminalStrings(t *testing.T) {
 		"\x1b]8;id=1d5ebds;file:///home/developer/.adroit/worktrees/TASK-5866-BILLING_18d3f758ebc0c3db/" + label +
 		"\x1b\\" + label + "\x1b]8;;\x1b\\)"
 
-	require.Equal(t, 213, ansi.PrintableRuneWidth(line), "the raw capture is the state being fixed")
+	// x/ansi reads the OSC 8 payload as an escape, so the raw capture measures
+	// right already; the strip is still needed for everything that searches the
+	// text.
+	require.Equal(t, 69, ansi.StringWidth(line))
 
 	stripped := stripTerminalStrings(line)
 
 	require.Contains(t, stripped, label, "the visible label between the markers survives")
 	require.NotContains(t, stripped, "file://", "the target does not")
-	require.Equal(t, lipgloss.Width(line), ansi.PrintableRuneWidth(stripped),
+	require.Equal(t, lipgloss.Width(line), ansi.StringWidth(stripped),
 		"width now agrees with what the terminal draws")
 	// The colour escapes are styling, not payload, and the probes below match
 	// through them.

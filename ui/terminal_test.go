@@ -12,7 +12,7 @@ import (
 	"github.com/AlexanderWeismannn/adroit/session"
 	"github.com/AlexanderWeismannn/adroit/session/tmux"
 
-	"github.com/mattn/go-runewidth"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
 )
 
@@ -398,7 +398,7 @@ func TestTerminalLongOutputDoesNotOverflowThePane(t *testing.T) {
 	rows := strings.Split(p.String(), "\n")
 	require.Len(t, rows, height, "rendered %d rows into a %d-row box", len(rows), height)
 	for i, row := range rows {
-		require.LessOrEqual(t, runewidth.StringWidth(plain(row)), width,
+		require.LessOrEqual(t, ansi.StringWidth(plain(row)), width,
 			"row %d overruns the pane: %q", i, plain(row))
 	}
 }

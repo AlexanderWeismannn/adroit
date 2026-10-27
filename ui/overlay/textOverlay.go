@@ -1,9 +1,9 @@
 package overlay
 
 import (
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/AlexanderWeismannn/adroit/theme"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 )
 
 // TextOverlay represents a text screen overlay
@@ -36,7 +36,7 @@ func NewTextOverlay(content string) *TextOverlay {
 //
 // Returns whether the overlay should be closed, and whatever the dismissal
 // callback wants run.
-func (t *TextOverlay) HandleKeyPress(msg tea.KeyMsg) (bool, tea.Cmd) {
+func (t *TextOverlay) HandleKeyPress(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 	// Close on any key
 	t.Dismissed = true
 	// Call the OnDismiss callback if it exists

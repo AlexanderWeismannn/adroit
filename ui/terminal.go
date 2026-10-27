@@ -11,8 +11,8 @@ import (
 	"github.com/AlexanderWeismannn/adroit/session/tmux"
 	"github.com/AlexanderWeismannn/adroit/theme"
 
-	"github.com/charmbracelet/bubbles/viewport"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/viewport"
+	"charm.land/lipgloss/v2"
 )
 
 var terminalPaneStyle, terminalFooterStyle lipgloss.Style
@@ -57,7 +57,7 @@ type TerminalPane struct {
 func NewTerminalPane() *TerminalPane {
 	return &TerminalPane{
 		sessions: make(map[string]*terminalSession),
-		viewport: viewport.New(0, 0),
+		viewport: viewport.New(),
 	}
 }
 
@@ -67,8 +67,8 @@ func (t *TerminalPane) SetSize(width, height int) {
 	defer t.mu.Unlock()
 	t.width = width
 	t.height = height
-	t.viewport.Width = width
-	t.viewport.Height = height
+	t.viewport.SetWidth(width)
+	t.viewport.SetHeight(height)
 	if s, ok := t.sessions[t.currentTitle]; ok && s.tmuxSession != nil {
 		if err := s.tmuxSession.SetDetachedSize(width, height); err != nil {
 			log.InfoLog.Printf("terminal pane: failed to set detached size: %v", err)
@@ -403,7 +403,7 @@ func (t *TerminalPane) ScrollUp() error {
 	if !t.isScrolling {
 		return t.enterScrollMode()
 	}
-	t.viewport.LineUp(1)
+	t.viewport.ScrollUp(1)
 	return nil
 }
 
@@ -414,7 +414,7 @@ func (t *TerminalPane) ScrollDown() error {
 	if !t.isScrolling {
 		return t.enterScrollMode()
 	}
-	t.viewport.LineDown(1)
+	t.viewport.ScrollDown(1)
 	return nil
 }
 

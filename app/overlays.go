@@ -11,7 +11,7 @@ import (
 	"github.com/AlexanderWeismannn/adroit/ui"
 	"github.com/AlexanderWeismannn/adroit/ui/overlay"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // An overlayScreen is drawn over the main view and owns the keyboard while it
@@ -21,7 +21,7 @@ import (
 // every reader checks.
 type overlayScreen interface {
 	// handleKey takes every key while the screen is open.
-	handleKey(m *home, msg tea.KeyMsg) tea.Cmd
+	handleKey(m *home, msg tea.KeyPressMsg) tea.Cmd
 	// render draws the screen; the caller composites it over the main view.
 	render(m *home) string
 	// resize is told the terminal's size on every change. A screen that sizes
@@ -34,7 +34,7 @@ type overlayScreen interface {
 // Sequence so the order holds.
 func (m *home) menuToDefault() tea.Cmd {
 	return tea.Sequence(
-		tea.WindowSize(),
+		tea.RequestWindowSize,
 		func() tea.Msg {
 			m.menu.SetState(ui.StateDefault)
 			return nil
@@ -68,7 +68,7 @@ func (s *promptScreen) resize(m *home, width, height int) {
 
 func (s *promptScreen) render(m *home) string { return s.input.Render() }
 
-func (s *promptScreen) handleKey(m *home, msg tea.KeyMsg) tea.Cmd {
+func (s *promptScreen) handleKey(m *home, msg tea.KeyPressMsg) tea.Cmd {
 	// Handle cancel via ctrl+c before delegating to the overlay
 	if msg.String() == "ctrl+c" {
 		return m.cancelPromptOverlay()
@@ -93,7 +93,7 @@ func (s *promptScreen) handleKey(m *home, msg tea.KeyMsg) tea.Cmd {
 				m.naming = true
 				m.menu.SetState(ui.StateNewInstance)
 				m.syncNaming(true)
-				return tea.WindowSize()
+				return tea.RequestWindowSize
 			}
 			return m.cancelPromptOverlay()
 		}
@@ -157,7 +157,7 @@ func (s *promptScreen) handleKey(m *home, msg tea.KeyMsg) tea.Cmd {
 					}
 				}
 
-				return tea.Batch(tea.WindowSize(), m.instanceChanged(), startCmd)
+				return tea.Batch(tea.RequestWindowSize, m.instanceChanged(), startCmd)
 			}
 
 			// Instance already running (the `i` key): send the prompt and go
@@ -166,10 +166,10 @@ func (s *promptScreen) handleKey(m *home, msg tea.KeyMsg) tea.Cmd {
 			m.overlay = nil
 			m.menu.SetState(ui.StateDefault)
 			if strings.TrimSpace(prompt) == "" {
-				return tea.WindowSize()
+				return tea.RequestWindowSize
 			}
 			title := selected.Title
-			return tea.Batch(tea.WindowSize(), func() tea.Msg {
+			return tea.Batch(tea.RequestWindowSize, func() tea.Msg {
 				if err := selected.SendPrompt(prompt); err != nil {
 					return err
 				}
@@ -180,7 +180,7 @@ func (s *promptScreen) handleKey(m *home, msg tea.KeyMsg) tea.Cmd {
 		// Close the overlay and reset state
 		m.overlay = nil
 		return tea.Sequence(
-			tea.WindowSize(),
+			tea.RequestWindowSize,
 			func() tea.Msg {
 				m.menu.SetState(ui.StateDefault)
 				m.showHelpScreen(helpStart(selected), nil)
@@ -236,7 +236,7 @@ func (s *helpScreen) resize(m *home, width, height int) {
 
 func (s *helpScreen) render(m *home) string { return s.text.Render() }
 
-func (s *helpScreen) handleKey(m *home, msg tea.KeyMsg) tea.Cmd {
+func (s *helpScreen) handleKey(m *home, msg tea.KeyPressMsg) tea.Cmd {
 	// Any key press will close the help overlay
 	shouldClose, dismissed := s.text.HandleKeyPress(msg)
 	if shouldClose {
@@ -257,7 +257,7 @@ func (s *helpScreen) handleKey(m *home, msg tea.KeyMsg) tea.Cmd {
 			return dismissed
 		}
 
-		return tea.WindowSize()
+		return tea.RequestWindowSize
 	}
 
 	return nil
@@ -282,7 +282,7 @@ func (s *confirmScreen) resize(m *home, width, height int) {
 
 func (s *confirmScreen) render(m *home) string { return s.dialog.Render() }
 
-func (s *confirmScreen) handleKey(m *home, msg tea.KeyMsg) tea.Cmd {
+func (s *confirmScreen) handleKey(m *home, msg tea.KeyPressMsg) tea.Cmd {
 	shouldClose := s.dialog.HandleKeyPress(msg)
 	if shouldClose {
 		m.overlay = nil
@@ -328,7 +328,7 @@ func (s *themeScreen) render(m *home) string { return s.picker.Render() }
 // handleKey drives the theme picker: every move installs the highlighted
 // palette so the interface behind the overlay is the preview, enter keeps it, and
 // escape puts back what was there.
-func (s *themeScreen) handleKey(m *home, msg tea.KeyMsg) tea.Cmd {
+func (s *themeScreen) handleKey(m *home, msg tea.KeyPressMsg) tea.Cmd {
 	// ctrl+c is cancel here rather than quit, matching the other overlays: the
 	// picker has changed what the user is looking at, and leaving cs in a theme
 	// they were only previewing would be a surprising way to exit.
@@ -392,7 +392,7 @@ func (s *restoreScreen) render(m *home) string { return s.picker.Render() }
 
 // handleKey drives the picker: moving changes nothing but the cursor, enter
 // starts the chosen session, and every way out leaves the list untouched.
-func (s *restoreScreen) handleKey(m *home, msg tea.KeyMsg) tea.Cmd {
+func (s *restoreScreen) handleKey(m *home, msg tea.KeyPressMsg) tea.Cmd {
 	// ctrl+c closes the picker rather than quitting, matching the other overlays.
 	if msg.String() == "ctrl+c" {
 		return s.close(m)
@@ -435,7 +435,7 @@ func (s *settingsScreen) render(m *home) string {
 	return s.settings.Render()
 }
 
-func (s *settingsScreen) handleKey(m *home, msg tea.KeyMsg) tea.Cmd {
+func (s *settingsScreen) handleKey(m *home, msg tea.KeyPressMsg) tea.Cmd {
 	if msg.String() == "ctrl+c" {
 		s.close(m)
 		return nil

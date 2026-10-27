@@ -9,10 +9,11 @@ package theme
 
 import (
 	"fmt"
+	"image/color"
 	"regexp"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 )
 
 // Role names a colour by what it means rather than by where it is used.
@@ -165,10 +166,33 @@ func OnChange(f func()) {
 // Set installs a palette and rebuilds every registered style.
 func Set(p Palette) {
 	current = p.clone()
+	rebuild()
+}
+
+func rebuild() {
 	for _, hook := range hooks {
 		hook()
 	}
 }
+
+// dark is which half of every pair is in use. Lip Gloss v2 no longer asks the
+// terminal itself; the program asks (tea.RequestBackgroundColor) and tells us.
+// Dark until told otherwise, which is also what a terminal that never answers
+// gets.
+var dark = true
+
+// SetDark says whether the terminal background is dark, and rebuilds every
+// style when the answer changes.
+func SetDark(isDark bool) {
+	if dark == isDark {
+		return
+	}
+	dark = isDark
+	rebuild()
+}
+
+// IsDark reports which half of the pairs is in use.
+func IsDark() bool { return dark }
 
 // Current returns a copy of the palette in use.
 func Current() Palette { return current.clone() }
@@ -183,16 +207,19 @@ func Current() Palette { return current.clone() }
 // palette it is not using — the theme picker previews every theme's colours side
 // by side, and installing each one in turn to render a swatch would mean
 // mutating global state from inside a render.
-func (p Palette) Color(role Role) lipgloss.TerminalColor {
+func (p Palette) Color(role Role) color.Color {
 	pair, ok := p[role]
 	if !ok {
 		pair = Default[role]
 	}
-	return lipgloss.AdaptiveColor{Light: pair.Light, Dark: pair.Dark}
+	if dark {
+		return lipgloss.Color(pair.Dark)
+	}
+	return lipgloss.Color(pair.Light)
 }
 
 // Color returns a role's colour from the palette in use.
-func Color(role Role) lipgloss.TerminalColor {
+func Color(role Role) color.Color {
 	return current.Color(role)
 }
 

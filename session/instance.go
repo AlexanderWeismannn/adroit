@@ -2,6 +2,8 @@ package session
 
 import (
 	"errors"
+	"path/filepath"
+
 	"github.com/AlexanderWeismannn/adroit/config"
 	"github.com/AlexanderWeismannn/adroit/log"
 	"github.com/AlexanderWeismannn/adroit/session/ci"
@@ -9,7 +11,6 @@ import (
 	"github.com/AlexanderWeismannn/adroit/session/resume"
 	"github.com/AlexanderWeismannn/adroit/session/tmux"
 	"github.com/AlexanderWeismannn/adroit/session/upstream"
-	"path/filepath"
 
 	"fmt"
 	"os"

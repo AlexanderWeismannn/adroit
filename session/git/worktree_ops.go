@@ -2,12 +2,13 @@ package git
 
 import (
 	"fmt"
-	"github.com/AlexanderWeismannn/adroit/config"
-	"github.com/AlexanderWeismannn/adroit/log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/AlexanderWeismannn/adroit/config"
+	"github.com/AlexanderWeismannn/adroit/log"
 )
 
 // Setup creates a new worktree for the session

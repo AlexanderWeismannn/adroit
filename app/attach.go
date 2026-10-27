@@ -5,7 +5,7 @@ import (
 
 	"github.com/AlexanderWeismannn/adroit/session/tmux"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // attachFinishedMsg is delivered once the user has detached from a session.

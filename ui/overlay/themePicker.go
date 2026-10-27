@@ -5,8 +5,8 @@ import (
 
 	"github.com/AlexanderWeismannn/adroit/theme"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // ThemePicker chooses a colour theme, previewing each one on the interface
@@ -60,20 +60,21 @@ const (
 	PickerCancel
 )
 
-func (t *ThemePicker) HandleKeyPress(msg tea.KeyMsg) PickerAction {
-	switch msg.Type {
+func (t *ThemePicker) HandleKeyPress(msg tea.KeyPressMsg) PickerAction {
+	switch msg.Code {
 	case tea.KeyUp:
 		return t.move(-1)
 	case tea.KeyDown:
 		return t.move(1)
 	case tea.KeyEnter:
 		return PickerConfirm
-	case tea.KeyEsc:
+	case tea.KeyEscape:
 		return PickerCancel
-	case tea.KeyRunes:
+	}
+	if msg.Text != "" && msg.Mod == 0 {
 		// The list is short and every name is distinct in its first letter or
 		// two, so j/k and a first-letter jump are both cheaper than arrowing.
-		switch string(msg.Runes) {
+		switch msg.Text {
 		case "k":
 			return t.move(-1)
 		case "j":
@@ -81,7 +82,7 @@ func (t *ThemePicker) HandleKeyPress(msg tea.KeyMsg) PickerAction {
 		case "q":
 			return PickerCancel
 		}
-		return t.jumpTo(strings.ToLower(string(msg.Runes)))
+		return t.jumpTo(strings.ToLower(msg.Text))
 	}
 	return PickerNone
 }

@@ -1,11 +1,12 @@
 package overlay
 
 import (
+	"image/color"
 	"strings"
 
+	"charm.land/lipgloss/v2"
 	"github.com/AlexanderWeismannn/adroit/theme"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/reflow/truncate"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // Frame is the one chrome every overlay wears: the title set into the top
@@ -22,7 +23,7 @@ import (
 //
 // width is the outer width. A body line wider than the inside is cut; the
 // footer is one line, already styled (see Keys). border colours the rule.
-func Frame(width int, title, body, footer string, border lipgloss.TerminalColor) string {
+func Frame(width int, title, body, footer string, border color.Color) string {
 	if width < 4 {
 		width = 4
 	}
@@ -35,7 +36,7 @@ func Frame(width int, title, body, footer string, border lipgloss.TerminalColor)
 	if title != "" {
 		t := " " + title + " "
 		if lipgloss.Width(t) > inner-2 {
-			t = truncate.StringWithTail(t, uint(max(inner-2, 1)), "…")
+			t = ansi.Truncate(t, max(inner-2, 1), "…")
 		}
 		top += label.Render(t)
 		used += lipgloss.Width(t)
@@ -45,7 +46,7 @@ func Frame(width int, title, body, footer string, border lipgloss.TerminalColor)
 	row := func(text string) string {
 		text = "  " + text
 		if w := lipgloss.Width(text); w > inner {
-			text = truncate.String(text, uint(inner))
+			text = ansi.Truncate(text, inner, "")
 		} else if w < inner {
 			text += strings.Repeat(" ", inner-w)
 		}

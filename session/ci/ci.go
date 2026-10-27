@@ -12,12 +12,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/AlexanderWeismannn/adroit/log"
-	"github.com/AlexanderWeismannn/adroit/session/git"
 	"os/exec"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/AlexanderWeismannn/adroit/log"
+	"github.com/AlexanderWeismannn/adroit/session/git"
 )
 
 // State is the overall verdict for a branch's CI checks.

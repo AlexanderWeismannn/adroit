@@ -1,6 +1,6 @@
 package ui
 
-import "github.com/charmbracelet/lipgloss"
+import "charm.land/lipgloss/v2"
 
 // BlankCell is U+2800 BRAILLE PATTERN BLANK: a cell that takes up width but is
 // not a space, and so survives the whitespace trim the preview pane applies

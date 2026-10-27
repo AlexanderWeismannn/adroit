@@ -9,7 +9,7 @@ import (
 	"github.com/AlexanderWeismannn/adroit/config"
 	"github.com/AlexanderWeismannn/adroit/session/dev"
 
-	"github.com/mattn/go-runewidth"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
 )
 
@@ -93,7 +93,7 @@ func TestALongDetailIsTruncatedRatherThanWrapped(t *testing.T) {
 
 	require.Len(t, lines, 6, "a long detail must not add rows")
 	for i, line := range lines {
-		require.LessOrEqual(t, runewidth.StringWidth(plain(line)), width,
+		require.LessOrEqual(t, ansi.StringWidth(plain(line)), width,
 			"line %d overruns the pane and would wrap: %q", i, plain(line))
 	}
 	require.Contains(t, plain(lines[2]), "…", "the overlong detail should be marked as cut")
@@ -135,7 +135,7 @@ func TestANarrowPaneStillRendersOneRowPerLamp(t *testing.T) {
 		lines := headerFor(width, lampStates()["coming up"], "waiting for the stack to come up")
 		require.Len(t, lines, 6, "width %d", width)
 		for i, line := range lines {
-			require.LessOrEqual(t, runewidth.StringWidth(plain(line)), width, "width %d, line %d", width, i)
+			require.LessOrEqual(t, ansi.StringWidth(plain(line)), width, "width %d, line %d", width, i)
 		}
 	}
 }
@@ -198,7 +198,7 @@ func TestNoRenderedRowOverrunsThePane(t *testing.T) {
 		}, "\n")
 
 		for i, row := range strings.Split(p.String(), "\n") {
-			require.LessOrEqual(t, runewidth.StringWidth(plain(row)), width,
+			require.LessOrEqual(t, ansi.StringWidth(plain(row)), width,
 				"width %d, row %d overruns: %q", width, i, plain(row))
 		}
 	}
@@ -209,7 +209,7 @@ func TestNoRenderedRowOverrunsThePane(t *testing.T) {
 func TestAClippedLineIsClosedOff(t *testing.T) {
 	got := clip("\x1b[31m"+strings.Repeat("red ", 40), 20)
 	require.True(t, strings.HasSuffix(got, "\x1b[0m"), "a clipped line must end reset, got %q", got)
-	require.LessOrEqual(t, runewidth.StringWidth(plain(got)), 20)
+	require.LessOrEqual(t, ansi.StringWidth(plain(got)), 20)
 	require.Contains(t, plain(got), "…", "a clipped line should show it was cut")
 }
 
@@ -218,7 +218,7 @@ func TestAClippedLineIsClosedOff(t *testing.T) {
 func TestAFittingLineIsLeftAlone(t *testing.T) {
 	line := "\x1b[32m[web] listening\x1b[0m"
 	require.Equal(t, line, clip(line, 60))
-	require.Equal(t, line, clip(line, runewidth.StringWidth(plain(line))))
+	require.Equal(t, line, clip(line, ansi.StringWidth(plain(line))))
 }
 
 // lipgloss centres a block by its widest line, so a ragged splash would centre
@@ -232,10 +232,10 @@ func TestTheSplashIsARectangle(t *testing.T) {
 		lines := strings.Split(strings.Trim(art, "\n"), "\n")
 		require.NotEmpty(t, lines, name)
 
-		width := runewidth.StringWidth(lines[0])
+		width := ansi.StringWidth(lines[0])
 		require.Greater(t, width, 0, "%s has no width", name)
 		for i, line := range lines {
-			require.Equal(t, width, runewidth.StringWidth(line),
+			require.Equal(t, width, ansi.StringWidth(line),
 				"%s row %d is a different width: %q", name, i, line)
 		}
 

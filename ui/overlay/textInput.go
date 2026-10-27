@@ -6,9 +6,9 @@ import (
 	"github.com/AlexanderWeismannn/adroit/config"
 	"github.com/AlexanderWeismannn/adroit/theme"
 
-	"github.com/charmbracelet/bubbles/textarea"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textarea"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 var (
@@ -112,7 +112,9 @@ func newTextarea(initialValue string) textarea.Model {
 	ti.Focus()
 	ti.ShowLineNumbers = false
 	ti.Prompt = ""
-	ti.FocusedStyle.CursorLine = lipgloss.NewStyle()
+	styles := ti.Styles()
+	styles.Focused.CursorLine = lipgloss.NewStyle()
+	ti.SetStyles(styles)
 	ti.CharLimit = 0
 	ti.MaxHeight = 0
 	return ti
@@ -216,7 +218,7 @@ func (t *TextInputOverlay) updateFocusState() {
 
 // HandleKeyPress processes a key press and updates the state accordingly.
 // Returns (shouldClose, branchFilterChanged).
-func (t *TextInputOverlay) HandleKeyPress(msg tea.KeyMsg) (bool, bool) {
+func (t *TextInputOverlay) HandleKeyPress(msg tea.KeyPressMsg) (bool, bool) {
 	// Any key is an attempt to fix whatever was wrong, so the message clears as
 	// soon as one arrives rather than sitting there through the correction.
 	t.errMsg = ""
@@ -225,7 +227,7 @@ func (t *TextInputOverlay) HandleKeyPress(msg tea.KeyMsg) (bool, bool) {
 	// it is a newline and in the branch picker it chooses, so sending took tab,
 	// tab, enter -- while the menu said "enter confirm". alt+enter too, where the
 	// terminal delivers it.
-	if msg.Type == tea.KeyCtrlS || (msg.Type == tea.KeyEnter && msg.Alt) {
+	if msg.String() == "ctrl+s" || msg.String() == "alt+enter" {
 		t.Submitted = true
 		if t.OnSubmit != nil {
 			t.OnSubmit()
@@ -233,7 +235,17 @@ func (t *TextInputOverlay) HandleKeyPress(msg tea.KeyMsg) (bool, bool) {
 		return true, false
 	}
 
-	switch msg.Type {
+	// shift+tab before the switch: its code is tab's, and the modifier is what
+	// tells them apart.
+	if msg.String() == "shift+tab" {
+		if t.isBranchPicker() && t.branchPicker.MoveUp() {
+			return false, false
+		}
+		t.setFocusIndex((t.FocusIndex - 1 + t.numStops) % t.numStops)
+		return false, false
+	}
+
+	switch msg.Code {
 	case tea.KeyTab:
 		// In the picker, tab steps down the options and leaves only from the
 		// last. Tab is how the picker is reached from the name prompt, so it is
@@ -244,13 +256,9 @@ func (t *TextInputOverlay) HandleKeyPress(msg tea.KeyMsg) (bool, bool) {
 		}
 		t.setFocusIndex((t.FocusIndex + 1) % t.numStops)
 		return false, false
-	case tea.KeyShiftTab:
-		if t.isBranchPicker() && t.branchPicker.MoveUp() {
-			return false, false
-		}
-		t.setFocusIndex((t.FocusIndex - 1 + t.numStops) % t.numStops)
-		return false, false
-	case tea.KeyEsc:
+	}
+	switch msg.Code {
+	case tea.KeyEscape:
 		t.Canceled = true
 		return true, false
 	case tea.KeyEnter:
@@ -282,7 +290,7 @@ func (t *TextInputOverlay) HandleKeyPress(msg tea.KeyMsg) (bool, bool) {
 			return false, false
 		}
 		if t.isProfilePicker() {
-			if msg.Type == tea.KeyLeft || msg.Type == tea.KeyRight {
+			if msg.Code == tea.KeyLeft || msg.Code == tea.KeyRight {
 				t.profilePicker.HandleKeyPress(msg)
 			}
 			return false, false

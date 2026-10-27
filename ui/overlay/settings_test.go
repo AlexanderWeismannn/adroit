@@ -8,8 +8,8 @@ import (
 	"github.com/AlexanderWeismannn/adroit/config"
 	"github.com/AlexanderWeismannn/adroit/secrets"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/stretchr/testify/require"
 )
 
@@ -27,20 +27,20 @@ func (m memStore) Backend() string       { return "test store" }
 
 func press(s *Settings, keys ...string) {
 	for _, k := range keys {
-		var msg tea.KeyMsg
+		var msg tea.KeyPressMsg
 		switch k {
 		case "enter":
-			msg = tea.KeyMsg{Type: tea.KeyEnter}
+			msg = tea.KeyPressMsg{Code: tea.KeyEnter}
 		case "esc":
-			msg = tea.KeyMsg{Type: tea.KeyEsc}
+			msg = tea.KeyPressMsg{Code: tea.KeyEscape}
 		case "tab":
-			msg = tea.KeyMsg{Type: tea.KeyTab}
+			msg = tea.KeyPressMsg{Code: tea.KeyTab}
 		case "down":
-			msg = tea.KeyMsg{Type: tea.KeyDown}
+			msg = tea.KeyPressMsg{Code: tea.KeyDown}
 		case "up":
-			msg = tea.KeyMsg{Type: tea.KeyUp}
+			msg = tea.KeyPressMsg{Code: tea.KeyUp}
 		default:
-			msg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(k)}
+			msg = keyText(k)
 		}
 		s.HandleKeyPress(msg, nil)
 	}
@@ -48,7 +48,7 @@ func press(s *Settings, keys ...string) {
 
 func typeText(s *Settings, text string) {
 	for _, r := range text {
-		s.HandleKeyPress(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}}, nil)
+		s.HandleKeyPress(tea.KeyPressMsg{Code: r, Text: string(r)}, nil)
 	}
 }
 
@@ -133,7 +133,7 @@ func TestSettingsKeyCheck(t *testing.T) {
 		ran = p.Name + ": " + command
 		return func() tea.Msg { return nil }
 	}
-	cmd, _ := s.HandleKeyPress(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("t")}, check)
+	cmd, _ := s.HandleKeyPress(keyText("t"), check)
 	require.NotNil(t, cmd)
 	require.True(t, strings.HasPrefix(ran, "claude: claude -p"), ran)
 
@@ -170,4 +170,14 @@ func TestSettingsIsTheSameSizeOnEveryTab(t *testing.T) {
 		require.Equal(t, h, gh, "height changed after %v", step)
 		require.Equal(t, w, gw, "width changed after %v", step)
 	}
+}
+
+// keyText is a key press carrying text, as a terminal delivers typed
+// characters: the first rune as the code, the whole string as the text.
+func keyText(s string) tea.KeyPressMsg {
+	r := []rune(s)
+	if len(r) == 0 {
+		return tea.KeyPressMsg{}
+	}
+	return tea.KeyPressMsg{Code: r[0], Text: s}
 }

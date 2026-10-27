@@ -23,9 +23,9 @@ import (
 	"github.com/AlexanderWeismannn/adroit/ui"
 	"github.com/AlexanderWeismannn/adroit/ui/overlay"
 
-	"github.com/charmbracelet/bubbles/spinner"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/spinner"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -100,11 +100,11 @@ func TestConfirmationModalKeyHandling(t *testing.T) {
 			h.confirmAction("Kill session", "Kill it?", "kill", nil)
 
 			// Create key message
-			var keyMsg tea.KeyMsg
+			var keyMsg tea.KeyPressMsg
 			if tc.key == "esc" {
-				keyMsg = tea.KeyMsg{Type: tea.KeyEscape}
+				keyMsg = tea.KeyPressMsg{Code: tea.KeyEscape}
 			} else {
-				keyMsg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(tc.key)}
+				keyMsg = keyText(tc.key)
 			}
 
 			// Call handleKeyPress
@@ -345,7 +345,7 @@ func TestConfirmedActionMessageReachesUpdateLoop(t *testing.T) {
 		confirm, open := h.overlay.(*confirmScreen)
 		require.True(t, open)
 
-		_, cmd := h.handleKeyPress(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+		_, cmd := h.handleKeyPress(tea.KeyPressMsg{Code: 'y', Text: "y"})
 		require.NotNil(t, cmd, "a confirmed action's message must reach the update loop")
 		assert.Equal(t, actionErr, cmd())
 
@@ -366,7 +366,7 @@ func TestConfirmedActionMessageReachesUpdateLoop(t *testing.T) {
 			return nil
 		})
 
-		_, cmd := h.handleKeyPress(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+		_, cmd := h.handleKeyPress(tea.KeyPressMsg{Code: 'y', Text: "y"})
 		select {
 		case <-ran:
 			t.Fatal("the action ran on the update loop; it must be returned as a Cmd")
@@ -391,7 +391,7 @@ func TestConfirmedActionMessageReachesUpdateLoop(t *testing.T) {
 			return fmt.Errorf("should never run")
 		})
 
-		_, cmd := h.handleKeyPress(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+		_, cmd := h.handleKeyPress(tea.KeyPressMsg{Code: 'n', Text: "n"})
 		assert.False(t, called)
 		assert.Nil(t, cmd)
 		assert.Nil(t, h.overlay)
@@ -481,13 +481,13 @@ func TestKillNoWorktreeSession(t *testing.T) {
 
 	// The first press only highlights the menu entry and re-sends the key; the
 	// second is the one that reaches the KeyKill handler.
-	killKey := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'D'}}
+	killKey := tea.KeyPressMsg{Code: 'D', Text: "D"}
 	_, _ = h.handleKeyPress(killKey)
 	_, _ = h.handleKeyPress(killKey)
 	_, open := h.overlay.(*confirmScreen)
 	require.True(t, open)
 
-	_, cmd := h.handleKeyPress(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	_, cmd := h.handleKeyPress(tea.KeyPressMsg{Code: 'y', Text: "y"})
 	require.NotNil(t, cmd)
 
 	// A kill is two steps now. The confirmed action runs off the loop and only
@@ -592,7 +592,7 @@ func TestTheViewIsExactlyTheTerminalHeight(t *testing.T) {
 		h := newSizedHome(t, size[0], size[1])
 		for _, window := range []bool{false, true} {
 			h.setWindowFocus(window)
-			lines := strings.Split(h.View(), "\n")
+			lines := strings.Split(h.view(), "\n")
 			require.Len(t, lines, size[1], "%dx%d window=%v", size[0], size[1], window)
 			for i, line := range lines {
 				require.LessOrEqual(t, lipgloss.Width(line), size[0],
@@ -600,7 +600,7 @@ func TestTheViewIsExactlyTheTerminalHeight(t *testing.T) {
 			}
 		}
 		h.setWindowFocus(false)
-		lines := strings.Split(h.View(), "\n")
+		lines := strings.Split(h.view(), "\n")
 		require.Len(t, lines, size[1], "%dx%d", size[0], size[1])
 		for i, line := range lines {
 			require.LessOrEqual(t, lipgloss.Width(line), size[0],
@@ -623,7 +623,7 @@ func TestTheViewIsNeverWiderThanTheTerminal(t *testing.T) {
 			"help":    &helpScreen{text: overlay.NewTextOverlay("Instance Created")},
 		} {
 			h.overlay = screen
-			for i, line := range strings.Split(h.View(), "\n") {
+			for i, line := range strings.Split(h.view(), "\n") {
 				require.LessOrEqual(t, lipgloss.Width(line), size[0],
 					"%dx%d %s row %d overruns the terminal: %q", size[0], size[1], name, i, line)
 			}
@@ -637,7 +637,7 @@ func TestTheViewIsNeverWiderThanTheTerminal(t *testing.T) {
 // re-sent each one through the update loop to get it delivered.
 func TestNamingKeystrokesAreNotStolenByTheMenu(t *testing.T) {
 	h := newSizedHome(t, 150, 40)
-	press := func(r rune) { _, _ = h.handleKeyPress(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}}) }
+	press := func(r rune) { _, _ = h.handleKeyPress(tea.KeyPressMsg{Code: r, Text: string(r)}) }
 	press('n')
 	press('n') // the first press only highlights the menu entry and re-sends
 
@@ -1033,22 +1033,22 @@ func TestEscFromTheBranchPickerReturnsToNaming(t *testing.T) {
 	}
 	// keySent skips the menu-highlight pass, which re-sends the key through the
 	// update loop instead of handling it.
-	press := func(msg tea.KeyMsg) { h.keySent = true; h.handleKeyPress(msg) }
+	press := func(msg tea.KeyPressMsg) { h.keySent = true; h.handleKeyPress(msg) }
 
-	press(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
+	press(keyText("n"))
 	require.True(t, h.naming)
-	press(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("fix")})
-	press(tea.KeyMsg{Type: tea.KeyTab})
+	press(keyText("fix"))
+	press(tea.KeyPressMsg{Code: tea.KeyTab})
 	require.NotNil(t, h.promptInput(), "tab opens the branch picker")
 	require.False(t, h.naming)
-	press(tea.KeyMsg{Type: tea.KeyEsc})
+	press(tea.KeyPressMsg{Code: tea.KeyEscape})
 
 	require.True(t, h.naming, "back at the name prompt")
 	require.Nil(t, h.overlay)
 	require.Equal(t, 1, h.list.NumInstances(), "the session being named survives")
 	require.Equal(t, "fix", h.list.GetSelectedInstance().Title)
 
-	press(tea.KeyMsg{Type: tea.KeyEsc})
+	press(tea.KeyPressMsg{Code: tea.KeyEscape})
 	require.False(t, h.naming)
 	require.Equal(t, 0, h.list.NumInstances(), "a second esc abandons it, as before")
 }
@@ -1081,7 +1081,7 @@ func TestTheViewSurvivesATerminalSmallerThanItsChrome(t *testing.T) {
 					&helpScreen{text: overlay.NewTextOverlay("Instance Created")},
 				} {
 					h.overlay = screen
-					_ = h.View()
+					_ = h.view()
 				}
 			}, "%dx%d", w, hgt)
 		}
@@ -1112,7 +1112,7 @@ func TestResumeRunsOffTheUpdateLoop(t *testing.T) {
 
 	press := func() tea.Cmd {
 		h.keySent = true // past the menu highlight, straight to the action
-		_, cmd := h.handleKeyPress(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+		_, cmd := h.handleKeyPress(tea.KeyPressMsg{Code: 'r', Text: "r"})
 		return cmd
 	}
 	require.NotNil(t, press(), "the resume must come back as a Cmd")
@@ -1131,7 +1131,7 @@ func TestResumeRunsOffTheUpdateLoop(t *testing.T) {
 	h.list.AddInstance(other)()
 	h.list.SelectInstance(other)
 	h.keySent = true
-	_, _ = h.handleKeyPress(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	_, _ = h.handleKeyPress(tea.KeyPressMsg{Code: 'c', Text: "c"})
 	require.False(t, h.busy[other], "checking out a paused session must not start a pause")
 
 	// The result arriving is what clears it.
@@ -1149,16 +1149,26 @@ func TestNewThenTabShowsTheWholeBranchPicker(t *testing.T) {
 	for _, size := range [][2]int{{120, 24}, {150, 30}, {227, 54}} {
 		h := newSizedHome(t, size[0], size[1])
 		h.appState = &fakeAppState{}
-		_, _ = h.handleKeyPress(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
-		_, _ = h.handleKeyPress(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+		_, _ = h.handleKeyPress(tea.KeyPressMsg{Code: 'n', Text: "n"})
+		_, _ = h.handleKeyPress(tea.KeyPressMsg{Code: 'n', Text: "n"})
 		h.keySent = true // tab highlights its menu entry first and re-sends itself
-		_, _ = h.handleKeyPress(tea.KeyMsg{Type: tea.KeyTab})
+		_, _ = h.handleKeyPress(tea.KeyPressMsg{Code: tea.KeyTab})
 		require.NotNil(t, h.promptInput(), "%dx%d: tab should open the branch picker", size[0], size[1])
 		h.updateHandleWindowSizeEvent(tea.WindowSizeMsg{Width: size[0], Height: size[1]})
 
-		view := h.View()
+		view := h.view()
 		require.Len(t, strings.Split(view, "\n"), size[1], "%dx%d", size[0], size[1])
 		require.Contains(t, view, "No branch (run in the repo itself)", "%dx%d", size[0], size[1])
 		require.Contains(t, view, " Enter ", "%dx%d: the submit button must be on screen", size[0], size[1])
 	}
+}
+
+// keyText is a key press carrying text, as a terminal delivers typed
+// characters: the first rune as the code, the whole string as the text.
+func keyText(s string) tea.KeyPressMsg {
+	r := []rune(s)
+	if len(r) == 0 {
+		return tea.KeyPressMsg{}
+	}
+	return tea.KeyPressMsg{Code: r[0], Text: s}
 }

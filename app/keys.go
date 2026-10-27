@@ -13,11 +13,11 @@ import (
 	"github.com/AlexanderWeismannn/adroit/ui"
 	"github.com/AlexanderWeismannn/adroit/ui/overlay"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/mattn/go-runewidth"
+	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
-func (m *home) handleMenuHighlighting(msg tea.KeyMsg) (cmd tea.Cmd, returnEarly bool) {
+func (m *home) handleMenuHighlighting(msg tea.KeyPressMsg) (cmd tea.Cmd, returnEarly bool) {
 	// Handle menu highlighting when you press a button. We intercept it here and immediately return to
 	// update the ui while re-sending the keypress. Then, on the next call to this, we actually handle the keypress.
 	if m.keySent {
@@ -37,8 +37,7 @@ func (m *home) handleMenuHighlighting(msg tea.KeyMsg) (cmd tea.Cmd, returnEarly 
 	// Enter, tab and escape still highlight: they are the ones the menu is
 	// advertising while the row is being named.
 	if m.naming {
-		switch msg.Type {
-		case tea.KeyRunes, tea.KeySpace, tea.KeyBackspace:
+		if msg.Text != "" || msg.Code == tea.KeySpace || msg.Code == tea.KeyBackspace {
 			return nil, false
 		}
 	}
@@ -66,7 +65,7 @@ func (m *home) handleMenuHighlighting(msg tea.KeyMsg) (cmd tea.Cmd, returnEarly 
 		m.keydownCallback(name)), true
 }
 
-func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
+func (m *home) handleKeyPress(msg tea.KeyPressMsg) (mod tea.Model, cmd tea.Cmd) {
 	cmd, returnEarly := m.handleMenuHighlighting(msg)
 	if returnEarly {
 		return m, cmd
@@ -89,7 +88,7 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 			m.promptAfterName = false
 			m.list.Kill()
 			return m, tea.Sequence(
-				tea.WindowSize(),
+				tea.RequestWindowSize,
 				func() tea.Msg {
 					m.menu.SetState(ui.StateDefault)
 					return nil
@@ -98,7 +97,7 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 		}
 
 		instance := m.list.GetInstances()[m.list.NumInstances()-1]
-		switch msg.Type {
+		switch msg.Code {
 		// Start the instance (enable previews etc) and go back to the main menu state.
 		case tea.KeyEnter:
 			if len(instance.Title) == 0 {
@@ -117,7 +116,7 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 				m.overlay = &promptScreen{input: input}
 				// Trigger initial branch search (no debounce, version 0)
 				initialSearch := m.runBranchSearch("", input.BranchFilterVersion())
-				return m, tea.Batch(tea.WindowSize(), initialSearch)
+				return m, tea.Batch(tea.RequestWindowSize, initialSearch)
 			}
 
 			// Set Loading status and finalize into the list immediately
@@ -137,12 +136,19 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 				}
 			}
 
-			return m, tea.Batch(tea.WindowSize(), m.instanceChanged(), startCmd)
-		case tea.KeyRunes:
-			if runewidth.StringWidth(instance.Title) >= 32 {
+			return m, tea.Batch(tea.RequestWindowSize, m.instanceChanged(), startCmd)
+		case tea.KeySpace:
+			if err := instance.SetTitle(instance.Title + " "); err != nil {
+				return m, m.handleError(err)
+			}
+		default:
+			if msg.Text == "" || msg.Mod != 0 {
+				return m, nil
+			}
+			if ansi.StringWidth(instance.Title) >= 32 {
 				return m, m.handleError(fmt.Errorf("title cannot be longer than 32 characters"))
 			}
-			if err := instance.SetTitle(instance.Title + string(msg.Runes)); err != nil {
+			if err := instance.SetTitle(instance.Title + msg.Text); err != nil {
 				return m, m.handleError(err)
 			}
 		case tea.KeyBackspace:
@@ -151,10 +157,6 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 				return m, nil
 			}
 			if err := instance.SetTitle(string(runes[:len(runes)-1])); err != nil {
-				return m, m.handleError(err)
-			}
-		case tea.KeySpace:
-			if err := instance.SetTitle(instance.Title + " "); err != nil {
 				return m, m.handleError(err)
 			}
 		case tea.KeyTab:
@@ -190,20 +192,19 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 				git.FetchBranches(currentDir)
 				return nil
 			}, m.runBranchSearch("", version))
-			return m, tea.Batch(tea.WindowSize(), initialSearch, refreshed)
-		case tea.KeyEsc:
+			return m, tea.Batch(tea.RequestWindowSize, initialSearch, refreshed)
+		case tea.KeyEscape:
 			m.list.Kill()
 			m.naming = false
 			m.instanceChanged()
 
 			return m, tea.Sequence(
-				tea.WindowSize(),
+				tea.RequestWindowSize,
 				func() tea.Msg {
 					m.menu.SetState(ui.StateDefault)
 					return nil
 				},
 			)
-		default:
 		}
 		return m, nil
 	}
@@ -211,7 +212,7 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 	// Exit scrolling mode when ESC is pressed and preview pane is in scrolling mode
 	// Check if Escape key was pressed and we're not in the diff tab (meaning we're in preview tab)
 	// Always check for escape key first to ensure it doesn't get intercepted elsewhere
-	if msg.Type == tea.KeyEsc {
+	if msg.Code == tea.KeyEscape {
 		// If in preview tab and in scroll mode, exit scroll mode
 		if m.tabbedWindow.IsInPreviewTab() && m.tabbedWindow.IsPreviewInScrollMode() {
 			// Use the selected instance from the list
@@ -267,7 +268,7 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 		}
 		m.menu.SetState(ui.StatePrompt)
 		m.overlay = &promptScreen{input: overlay.NewTextInputOverlay(fmt.Sprintf("Send to %s", selected.Title), "")}
-		return m, tea.WindowSize()
+		return m, tea.RequestWindowSize
 	case keys.KeyHelp:
 		return m.showHelpScreen(helpTypeGeneral{}, nil)
 	case keys.KeyPrompt:

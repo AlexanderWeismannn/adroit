@@ -14,7 +14,7 @@ import (
 	"github.com/AlexanderWeismannn/adroit/session/tmux"
 	"github.com/AlexanderWeismannn/adroit/session/upstream"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 const branchSearchDebounce = 150 * time.Millisecond

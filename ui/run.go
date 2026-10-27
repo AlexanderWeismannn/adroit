@@ -10,12 +10,10 @@ import (
 	"github.com/AlexanderWeismannn/adroit/session/dev"
 	"github.com/AlexanderWeismannn/adroit/theme"
 
-	"github.com/mattn/go-runewidth"
-	"github.com/muesli/reflow/ansi"
-	"github.com/muesli/reflow/truncate"
+	"github.com/charmbracelet/x/ansi"
 
-	"github.com/charmbracelet/bubbles/viewport"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/viewport"
+	"charm.land/lipgloss/v2"
 )
 
 var (
@@ -80,15 +78,15 @@ type RunPane struct {
 }
 
 func NewRunPane(stack *dev.Stack) *RunPane {
-	return &RunPane{stack: stack, viewport: viewport.New(0, 0)}
+	return &RunPane{stack: stack, viewport: viewport.New()}
 }
 
 func (d *RunPane) SetSize(width, height int) {
 	width, height = max(width, 0), max(height, 0)
 	d.mu.Lock()
 	d.width, d.height = width, height
-	d.viewport.Width = width
-	d.viewport.Height = height
+	d.viewport.SetWidth(width)
+	d.viewport.SetHeight(height)
 	stack := d.stack
 	d.mu.Unlock()
 
@@ -250,11 +248,11 @@ func renderLine(segs []segment, width int) string {
 			break
 		}
 		text := seg.text
-		if runewidth.StringWidth(text) > room {
-			text = runewidth.Truncate(text, room, "…")
+		if ansi.StringWidth(text) > room {
+			text = ansi.Truncate(text, room, "…")
 		}
 		b.WriteString(seg.style.Render(text))
-		used += runewidth.StringWidth(text)
+		used += ansi.StringWidth(text)
 	}
 	return b.String()
 }
@@ -284,7 +282,7 @@ func (d *RunPane) header() string {
 	// One width for every name, so the details line up as a column too.
 	nameWidth := 0
 	for _, l := range d.status.Lamps {
-		if w := runewidth.StringWidth(l.Name); w > nameWidth {
+		if w := ansi.StringWidth(l.Name); w > nameWidth {
 			nameWidth = w
 		}
 	}
@@ -350,17 +348,17 @@ func (d *RunPane) titleLine() string {
 // Cutting keeps one row per line, so the header cannot move. The full text is
 // still there in the pane itself, under shift-↑ or ↵.
 func clip(line string, width int) string {
-	if width <= 0 || ansi.PrintableRuneWidth(line) <= width {
+	if width <= 0 || ansi.StringWidth(line) <= width {
 		return line
 	}
 	// Truncating mid-line drops whatever reset code closed it, so the last
 	// colour would bleed down the rest of the pane.
-	return truncate.StringWithTail(line, uint(width), "…") + "\x1b[0m"
+	return ansi.Truncate(line, width, "…") + "\x1b[0m"
 }
 
 // padRight pads s to width in terminal cells.
 func padRight(s string, width int) string {
-	if pad := width - runewidth.StringWidth(s); pad > 0 {
+	if pad := width - ansi.StringWidth(s); pad > 0 {
 		return s + strings.Repeat(" ", pad)
 	}
 	return s
@@ -444,7 +442,7 @@ func (d *RunPane) ScrollUp() error {
 	if !d.isScrolling {
 		return d.enterScrollMode()
 	}
-	d.viewport.LineUp(1)
+	d.viewport.ScrollUp(1)
 	return nil
 }
 
@@ -455,7 +453,7 @@ func (d *RunPane) ScrollDown() error {
 	if !d.isScrolling {
 		return d.enterScrollMode()
 	}
-	d.viewport.LineDown(1)
+	d.viewport.ScrollDown(1)
 	return nil
 }
 

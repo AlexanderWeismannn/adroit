@@ -5,11 +5,11 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/lipgloss/v2"
 	"github.com/AlexanderWeismannn/adroit/session"
 	"github.com/AlexanderWeismannn/adroit/session/ci"
 	"github.com/AlexanderWeismannn/adroit/session/dev"
 	"github.com/AlexanderWeismannn/adroit/theme"
-	"github.com/charmbracelet/lipgloss"
 )
 
 // Side is the status column of the wide layout: everything known about the

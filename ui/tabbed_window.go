@@ -2,19 +2,21 @@ package ui
 
 import (
 	"fmt"
+	"image/color"
 	"strconv"
 	"strings"
 
 	"github.com/AlexanderWeismannn/adroit/log"
+	"github.com/charmbracelet/x/ansi"
 
+	"charm.land/lipgloss/v2"
 	"github.com/AlexanderWeismannn/adroit/session"
 	"github.com/AlexanderWeismannn/adroit/session/dev"
 	"github.com/AlexanderWeismannn/adroit/theme"
-	"github.com/charmbracelet/lipgloss"
 )
 
 var (
-	highlightColor lipgloss.TerminalColor
+	highlightColor color.Color
 	windowStyle    lipgloss.Style
 	// The tab bar is one row -- the window's own top border, with the labels set
 	// into it -- where it used to be three rows of boxes. tabRuleStyle draws the
@@ -460,7 +462,9 @@ func (w *TabbedWindow) tabBar(width int) string {
 			}
 			label := name
 			if nameWidth > 0 && lipgloss.Width(label) > nameWidth {
-				label = clip(label, nameWidth)
+				// The name carries no style of its own, so it is cut plain; clip's
+				// trailing reset would be drawn as text by the underlined style.
+				label = ansi.Truncate(label, nameWidth, "…")
 			}
 			style := tabLabelStyle
 			if i == w.activeTab {

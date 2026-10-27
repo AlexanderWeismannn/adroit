@@ -3,15 +3,26 @@ package app
 import (
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/AlexanderWeismannn/adroit/log"
 	"github.com/AlexanderWeismannn/adroit/ui"
 	"github.com/AlexanderWeismannn/adroit/ui/overlay"
 
-	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/reflow/truncate"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
-func (m *home) View() string {
+// View composes the frame. The alt screen and cell-motion mouse reporting are
+// the view's own properties in v2, in place of the program options they were.
+func (m *home) View() tea.View {
+	v := tea.NewView(m.view())
+	v.AltScreen = true
+	v.MouseMode = tea.MouseModeCellMotion
+	return v
+}
+
+func (m *home) view() string {
 	// The header carries the counts the list's title used to.
 	m.header.Sessions = m.list.NumInstances()
 	m.header.NeedYou = m.list.AttentionCount()
@@ -67,7 +78,7 @@ func (m *home) fitToTerminal(view string) string {
 	cut := false
 	for i, line := range lines {
 		if lipgloss.Width(line) > m.termWidth {
-			lines[i] = truncate.String(line, uint(m.termWidth))
+			lines[i] = ansi.Truncate(line, m.termWidth, "")
 			cut = true
 		}
 	}

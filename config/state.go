@@ -3,10 +3,11 @@ package config
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/AlexanderWeismannn/adroit/log"
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/AlexanderWeismannn/adroit/log"
 )
 
 const (

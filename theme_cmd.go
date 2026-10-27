@@ -3,14 +3,15 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/AlexanderWeismannn/adroit/config"
-	"github.com/AlexanderWeismannn/adroit/log"
-	"github.com/AlexanderWeismannn/adroit/theme"
 	"io"
 	"sort"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"github.com/AlexanderWeismannn/adroit/config"
+	"github.com/AlexanderWeismannn/adroit/log"
+	"github.com/AlexanderWeismannn/adroit/theme"
+
+	"charm.land/lipgloss/v2"
 	"github.com/spf13/cobra"
 )
 

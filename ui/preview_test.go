@@ -14,7 +14,7 @@ import (
 	"github.com/AlexanderWeismannn/adroit/session"
 	"github.com/AlexanderWeismannn/adroit/session/tmux"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/stretchr/testify/require"
 )
 
@@ -660,7 +660,7 @@ func TestScrolledPreviewPinsItsStatus(t *testing.T) {
 	p := NewPreviewPane()
 	p.SetSize(60, 10)
 	p.isScrolling = true
-	p.viewport.Height = p.viewportHeight()
+	p.viewport.SetHeight(p.viewportHeight())
 	p.viewport.SetContent(strings.Repeat("history\n", 100))
 	p.viewport.GotoTop()
 

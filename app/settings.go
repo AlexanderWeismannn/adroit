@@ -12,7 +12,7 @@ import (
 	"github.com/AlexanderWeismannn/adroit/session/git"
 	"github.com/AlexanderWeismannn/adroit/ui/overlay"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // checkTimeout bounds a key check: the agent's first reply over the network.

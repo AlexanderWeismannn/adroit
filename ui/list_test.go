@@ -18,10 +18,9 @@ import (
 	"github.com/AlexanderWeismannn/adroit/session/upstream"
 	"github.com/AlexanderWeismannn/adroit/theme"
 
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/mattn/go-runewidth"
-	"github.com/muesli/termenv"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
 )
 
@@ -189,7 +188,7 @@ func TestRenderCIBadge(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			r, inst := newTestRenderer(t, 80, "feature", tt.status)
-			require.Contains(t, branchLineOf(t, r.Render(inst, 1, false, false, false)), tt.want)
+			require.Contains(t, plain(branchLineOf(t, r.Render(inst, 1, false, false, false))), tt.want)
 		})
 	}
 }
@@ -288,7 +287,7 @@ func TestRenderCIBadgeDoesNotChangeLineWidth(t *testing.T) {
 				"width %d, state %v: badge changed the line width", width, status.State)
 			// Anchored on the glyph and its separator; the separator used to be a
 			// hyphen, which read as part of the branch name.
-			require.Contains(t, line, branchIcon+" "+runewidth.Truncate(longBranch, 3, ""),
+			require.Contains(t, line, branchIcon+" "+ansi.Truncate(longBranch, 3, ""),
 				"width %d, state %v: branch name vanished entirely", width, status.State)
 		}
 	}
@@ -299,9 +298,6 @@ func TestRenderCIBadgeDoesNotChangeLineWidth(t *testing.T) {
 // middle of the highlighted row. Guard the whole class rather than the one space:
 // on a selected row, no reset may be immediately followed by an unstyled space.
 func TestRenderSelectedRowHasNoUnstyledGaps(t *testing.T) {
-	previous := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	t.Cleanup(func() { lipgloss.SetColorProfile(previous) })
 
 	for _, status := range []ci.Status{
 		{State: ci.StateNoPR},
@@ -338,9 +334,6 @@ func TestRenderShowsTheResolvedBranch(t *testing.T) {
 // every line of the list by a column as the selection moves, which is the kind of
 // thing that looks like a rendering bug rather than a style choice.
 func TestSelectedRowMatchesUnselectedWidth(t *testing.T) {
-	previous := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	t.Cleanup(func() { lipgloss.SetColorProfile(previous) })
 
 	for _, width := range []int{20, 30, 40, 60, 80, 120} {
 		for _, status := range []ci.Status{
@@ -366,7 +359,7 @@ func TestDiffStatsAreSpaceSeparated(t *testing.T) {
 	r, inst := newTestRenderer(t, 80, "feature", ci.Status{})
 	inst.SetDiffStats(&git.DiffStats{Added: 2200, Removed: 12}, false)
 
-	line := branchLineOf(t, r.Render(inst, 1, false, false, false))
+	line := plain(branchLineOf(t, r.Render(inst, 1, false, false, false)))
 	require.Contains(t, line, "+2.2k -12")
 	require.NotContains(t, line, "+2.2k,-12")
 }
@@ -463,13 +456,8 @@ func mustAbs(t *testing.T, p string) string {
 // rebuild hooks registered in init actually run. Without that this whole feature
 // would configure cleanly and change nothing on screen.
 func TestThemeChangeReachesTheRenderedRow(t *testing.T) {
-	previous := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.TrueColor)
 	before := theme.Current()
-	t.Cleanup(func() {
-		theme.Set(before)
-		lipgloss.SetColorProfile(previous)
-	})
+	t.Cleanup(func() { theme.Set(before) })
 
 	r, inst := newTestRenderer(t, 80, "TASK-1", ci.Status{State: ci.StateSuccess, PRNumber: 1})
 	base := r.Render(inst, 1, true, false, false)
@@ -519,7 +507,7 @@ func TestTheFeedbackMarkerIsCountedInTheBadgeWidth(t *testing.T) {
 	quiet, _ := ciBadge(ci.Status{State: ci.StateSuccess, PRNumber: 4473}, lipgloss.NoColor{}, false)
 	noisy, _ := ciBadge(ci.Status{State: ci.StateSuccess, PRNumber: 4473, Feedback: ci.FeedbackAddressed}, lipgloss.NoColor{}, false)
 
-	require.Equal(t, runewidth.StringWidth(quiet)+2, runewidth.StringWidth(noisy),
+	require.Equal(t, ansi.StringWidth(quiet)+2, ansi.StringWidth(noisy),
 		"the marker and its leading space must be in the width the caller budgets")
 }
 
@@ -713,9 +701,6 @@ func TestTheNamingRowShowsWhatIsHappening(t *testing.T) {
 // row fell back to the terminal's own background: a dark input-box-shaped bar
 // through the middle of the highlight, and a notch out of its corner.
 func TestTheNamingRowIsStillAnUnbrokenBar(t *testing.T) {
-	previous := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	t.Cleanup(func() { lipgloss.SetColorProfile(previous) })
 	before := theme.Current()
 	t.Cleanup(func() { theme.Set(before) })
 	solarized, ok := theme.Builtin("solarized")
@@ -941,9 +926,6 @@ func unbackedRunes(line string) string {
 // them: on a Solarized selected row that space showed as a dark notch in the
 // middle of the bar.
 func TestSelectedRowHasNoBackgroundGaps(t *testing.T) {
-	previous := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	t.Cleanup(func() { lipgloss.SetColorProfile(previous) })
 	before := theme.Current()
 	t.Cleanup(func() { theme.Set(before) })
 	solarized, ok := theme.Builtin("solarized")
@@ -998,7 +980,7 @@ func TestTheBranchGlyphGoesWithItsName(t *testing.T) {
 	columnOf := func(t *testing.T, out, needle string) int {
 		t.Helper()
 		line := lineContaining(t, plain(out), needle)
-		return runewidth.StringWidth(line[:strings.Index(line, needle)])
+		return ansi.StringWidth(line[:strings.Index(line, needle)])
 	}
 	require.Equal(t, columnOf(t, named, "-193"), columnOf(t, echoed, "-193"),
 		"the diff stats should not move when the glyph goes")
@@ -1050,7 +1032,7 @@ func TestSyncBadgeWidthMatchesItsPlainForm(t *testing.T) {
 		{Ref: "origin/review", Behind: 12, Ahead: 4},
 	} {
 		plain, styled := syncBadge(status, lipgloss.NoColor{}, false)
-		require.Equal(t, runewidth.StringWidth(plain), lipgloss.Width(styled))
+		require.Equal(t, ansi.StringWidth(plain), lipgloss.Width(styled))
 	}
 }
 
@@ -1090,7 +1072,7 @@ func TestRenderSyncBadgeDoesNotChangeLineWidth(t *testing.T) {
 				line := branchLineOf(t, r.Render(inst, 1, false, false, false))
 				require.Equal(t, baseWidth, lipgloss.Width(line),
 					"width %d, status %+v: badge changed the line width", width, status)
-				require.Contains(t, line, branchIcon+" "+runewidth.Truncate(longBranch, 3, ""),
+				require.Contains(t, line, branchIcon+" "+ansi.Truncate(longBranch, 3, ""),
 					"width %d, status %+v: branch name vanished entirely", width, status)
 			}
 		}
@@ -1128,8 +1110,8 @@ func TestTruncationSpendsTheWholeColumn(t *testing.T) {
 		out := render(t, name(n), "b")
 		if strings.Contains(out, elision) {
 			require.NotEmpty(t, fits, "no title ever fit at width %d", width)
-			require.Equal(t, runewidth.StringWidth(fits),
-				runewidth.StringWidth(strings.TrimSpace(lineContaining(t, out, elision))),
+			require.Equal(t, ansi.StringWidth(fits),
+				ansi.StringWidth(strings.TrimSpace(lineContaining(t, out, elision))),
 				"a cut title should fill the column the longest uncut one did")
 			break
 		}
@@ -1144,7 +1126,7 @@ func TestTruncationSpendsTheWholeColumn(t *testing.T) {
 		line := strings.TrimSpace(branchLineOf(t, out))
 		if strings.Contains(line, elision) {
 			require.NotEmpty(t, branchFits, "no branch ever fit at width %d", width)
-			require.Equal(t, runewidth.StringWidth(branchFits), runewidth.StringWidth(line),
+			require.Equal(t, ansi.StringWidth(branchFits), ansi.StringWidth(line),
 				"a cut branch should fill the column the longest uncut one did")
 			break
 		}

@@ -3,8 +3,9 @@ package session
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/AlexanderWeismannn/adroit/config"
 	"time"
+
+	"github.com/AlexanderWeismannn/adroit/config"
 )
 
 // InstanceData represents the serializable data of an Instance

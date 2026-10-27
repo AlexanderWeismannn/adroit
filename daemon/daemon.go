@@ -3,9 +3,6 @@ package daemon
 import (
 	"errors"
 	"fmt"
-	"github.com/AlexanderWeismannn/adroit/config"
-	"github.com/AlexanderWeismannn/adroit/log"
-	"github.com/AlexanderWeismannn/adroit/session"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -15,6 +12,10 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/AlexanderWeismannn/adroit/config"
+	"github.com/AlexanderWeismannn/adroit/log"
+	"github.com/AlexanderWeismannn/adroit/session"
 )
 
 // RunDaemon runs the daemon process which iterates over all sessions and runs AutoYes mode on them.

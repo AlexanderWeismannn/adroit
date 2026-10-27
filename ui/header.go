@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"charm.land/lipgloss/v2"
 	"github.com/AlexanderWeismannn/adroit/theme"
-	"github.com/charmbracelet/lipgloss"
 )
 
 // Header is the strip along the top of the screen: where you are, how many

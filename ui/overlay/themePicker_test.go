@@ -5,9 +5,7 @@ import (
 
 	"github.com/AlexanderWeismannn/adroit/theme"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/termenv"
+	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/require"
 )
 
@@ -24,8 +22,8 @@ func TestThemePickerOpensOnTheThemeInUse(t *testing.T) {
 }
 
 func TestThemePickerNavigation(t *testing.T) {
-	up := tea.KeyMsg{Type: tea.KeyUp}
-	down := tea.KeyMsg{Type: tea.KeyDown}
+	up := tea.KeyPressMsg{Code: tea.KeyUp}
+	down := tea.KeyPressMsg{Code: tea.KeyDown}
 
 	p := NewThemePicker("default") // index 0
 	// At the top edge: no move, and no action, so the caller does not re-install
@@ -42,8 +40,8 @@ func TestThemePickerNavigation(t *testing.T) {
 	}
 	require.Equal(t, PickerNone, p.HandleKeyPress(down))
 
-	require.Equal(t, PickerConfirm, p.HandleKeyPress(tea.KeyMsg{Type: tea.KeyEnter}))
-	require.Equal(t, PickerCancel, p.HandleKeyPress(tea.KeyMsg{Type: tea.KeyEsc}))
+	require.Equal(t, PickerConfirm, p.HandleKeyPress(tea.KeyPressMsg{Code: tea.KeyEnter}))
+	require.Equal(t, PickerCancel, p.HandleKeyPress(tea.KeyPressMsg{Code: tea.KeyEscape}))
 }
 
 // Confirming without having moved must not write a config file for a choice that
@@ -52,15 +50,15 @@ func TestThemePickerReportsWhetherTheChoiceMoved(t *testing.T) {
 	p := NewThemePicker("default")
 	require.False(t, p.Changed())
 
-	p.HandleKeyPress(tea.KeyMsg{Type: tea.KeyDown})
+	p.HandleKeyPress(tea.KeyPressMsg{Code: tea.KeyDown})
 	require.True(t, p.Changed())
 
-	p.HandleKeyPress(tea.KeyMsg{Type: tea.KeyUp})
+	p.HandleKeyPress(tea.KeyPressMsg{Code: tea.KeyUp})
 	require.False(t, p.Changed(), "back where it started is not a change")
 }
 
 func TestThemePickerFirstLetterJump(t *testing.T) {
-	runes := func(s string) tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)} }
+	runes := func(s string) tea.KeyPressMsg { return keyText(s) }
 
 	p := NewThemePicker("default")
 	require.Equal(t, PickerPreview, p.HandleKeyPress(runes("g")))
@@ -84,15 +82,8 @@ func TestThemePickerFirstLetterJump(t *testing.T) {
 // every other theme's swatch along with it — the list is a comparison, and it
 // stops being one the moment the installed palette bleeds into the rows.
 func TestThemePickerRowsKeepTheirOwnColours(t *testing.T) {
-	// Without this the test renders under the non-TTY profile, which strips every
-	// colour and would make the assertion pass for the wrong reason.
-	previous := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.TrueColor)
 	before := theme.Current()
-	t.Cleanup(func() {
-		theme.Set(before)
-		lipgloss.SetColorProfile(previous)
-	})
+	t.Cleanup(func() { theme.Set(before) })
 
 	def, _ := theme.Builtin("default")
 	theme.Set(def)

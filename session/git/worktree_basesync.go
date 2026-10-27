@@ -3,12 +3,13 @@ package git
 import (
 	"context"
 	"fmt"
-	"github.com/AlexanderWeismannn/adroit/cmd"
-	"github.com/AlexanderWeismannn/adroit/config"
-	"github.com/AlexanderWeismannn/adroit/log"
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/AlexanderWeismannn/adroit/cmd"
+	"github.com/AlexanderWeismannn/adroit/config"
+	"github.com/AlexanderWeismannn/adroit/log"
 )
 
 // baseSyncTimeout bounds the fetch. A new session is being created and the user

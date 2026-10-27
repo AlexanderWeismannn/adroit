@@ -6,6 +6,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
+	"runtime/debug"
+	"strings"
+
 	"github.com/AlexanderWeismannn/adroit/app"
 	cmd2 "github.com/AlexanderWeismannn/adroit/cmd"
 	"github.com/AlexanderWeismannn/adroit/config"
@@ -14,10 +19,6 @@ import (
 	"github.com/AlexanderWeismannn/adroit/session"
 	"github.com/AlexanderWeismannn/adroit/session/git"
 	"github.com/AlexanderWeismannn/adroit/session/tmux"
-	"os"
-	"path/filepath"
-	"runtime/debug"
-	"strings"
 
 	"github.com/spf13/cobra"
 )
