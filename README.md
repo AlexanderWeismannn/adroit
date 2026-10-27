@@ -19,19 +19,22 @@ its build passed.
 
 ![Three agents working at once in Adroit; then a diff, the dev stack starting, the theme picker, adding an OpenAI agent and its key in settings, and attaching to a session](assets/demo.gif)
 
-<sub>Recorded from the real app. The agent is a scripted stand-in so the recording is repeatable; see
-[`demo/record.py`](demo/record.py).</sub>
+<sub>Recorded from the real app before the layout revamp; the agent is a scripted stand-in so the
+recording is repeatable (see [`demo/record.py`](demo/record.py)). Re-record with `agg` once it is
+installed: `go build -o /tmp/adroit . && python3 demo/record.py /tmp/adroit demo.cast && agg demo.cast assets/demo.gif`.</sub>
 
 ## How it works
 
 1. **Start a task.** `N` asks for a name and a first prompt. Adroit cuts a branch, adds a worktree under
    `~/.adroit/worktrees`, and starts the agent in its own tmux session. Your main checkout is never touched.
-2. **Let it work, and start another.** A row spins while its agent is mid-turn and shows `✓ done` when the
-   turn ends, with the size of the change beside it. The agents do not share a checkout, so they cannot
-   overwrite each other.
-3. **Look in.** `tab` switches the right-hand pane between Preview, Diff, Terminal and Run. `↵` attaches you
-   to the agent itself; `ctrl-q` brings you back. Closing the terminal stops nothing: tmux keeps every
-   session alive until you return.
+2. **Let it work, and start another.** Each row leads with its state: the spinner while the agent is
+   mid-turn, `◉` for the moments after it finishes, `●` when it is your turn, `?` when it is waiting on
+   an answer, `○` when it is checked out. The size of the change sits on the branch line. The agents do
+   not share a checkout, so they cannot overwrite each other.
+3. **Look in.** `←`/`→` switch the window between Preview, Diff, Terminal and Run; `tab` hands the
+   keyboard to the window (its border takes the accent) so the arrows scroll it. `↵` attaches you to the
+   agent itself; `ctrl-q` brings you back. Closing the terminal stops nothing: tmux keeps every session
+   alive until you return.
 4. **Hand it off.** `p` commits and pushes the branch, `c` commits and pauses the session so you can
    check the branch out, and `g` opens its pull request. With [`gh`](https://cli.github.com/) logged in, each row also shows its CI result and
    review state.
@@ -158,9 +161,24 @@ The default program is `claude`, and it is worth keeping that on its latest vers
 - Launch a one-off: `adroit -p "codex"`, `adroit -p "aider ..."`, `adroit -p "gemini"`
 - Make it the default with `default_program`, or define [profiles](#profiles) to pick per session
 
+## Layout
+
+The screen opens with a strip naming the repository, its branch, how many sessions there are and how
+many need you, and the layout mode on the right. The width picks the mode:
+
+| Columns | Mode | What is on screen |
+|---------|------|-------------------|
+| under 90 | compact | one pane at a time: the list, or the window with the session named on a strip above it; `tab` swaps them, `<`/`>` move between sessions from the window |
+| 90–159 | split | the list beside the window |
+| 160 and up | wide | split plus a status column: branch and remote standing, pull request and checks, dev-stack lamps, the agent's state, the session's recent notices |
+
+`m` cycles the mode, and the choice is remembered for that width. Whichever pane has the keyboard wears
+the accent border; the bar along the bottom shows only the keys that apply right now, with a key that
+exists but has nothing to do drawn dim.
+
 ## Keys
 
-The menu at the bottom of the screen shows what is available in the current context.
+The bar at the bottom of the screen shows what is available in the current context; `?` shows all of it.
 
 ### Sessions
 
@@ -191,8 +209,11 @@ The menu at the bottom of the screen shows what is available in the current cont
 
 ### Navigation
 
-- `tab` — cycle the Preview, Diff, Terminal and Run tabs
-- `shift-↑`/`shift-↓`, `pgup`/`pgdn` — scroll the active tab; `esc` leaves scroll mode
+- `←`/`h`, `→`/`l` — switch between the Preview, Diff, Terminal and Run tabs
+- `tab` — give the keyboard to the window, and back to the list; with it, `↑`/`↓` scroll the window
+  and `<`/`>` move between sessions
+- `shift-↑`/`shift-↓`, `pgup`/`pgdn` — scroll the active tab from either pane; `esc` returns to the live view
+- `m` — cycle the layout: compact, split, wide
 - `q` — quit; the sessions keep running
 
 ## Configuration
@@ -320,6 +341,7 @@ by name, keeping any arguments after it.
 | `bell` | on | Ring the terminal bell when a session finishes its turn or stops on a question |
 | `notify_command` | none | Run through `sh -c` on the same events, with `ADROIT_SESSION` and `ADROIT_EVENT` (`finished` or `needs-input`) set — for a desktop notification |
 | `github_ci_status` | on | The CI and pull-request column; off also hides `g` |
+| `mouse` | off | A click selects a row or switches a tab; the wheel scrolls either way |
 | `auto_yes` | off | Accept agent prompts automatically (experimental; same as `-y`) |
 | `daemon_poll_interval` | `1000` | How often, in ms, the auto-yes daemon checks sessions |
 
