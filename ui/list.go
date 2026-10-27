@@ -235,6 +235,9 @@ type List struct {
 	autoyes       bool
 	// focused is whether the list owns the keyboard, which its border shows.
 	focused bool
+	// compact draws one line per session, for the mode where the list has the
+	// whole width and the window is behind it.
+	compact bool
 
 	// map of repo name to number of instances using it. Used to display the repo name only if there are
 	// multiple repos in play.
@@ -258,6 +261,9 @@ func NewList(spinner *spinner.Model, autoYes bool) *List {
 
 // SetFocused records whether the list owns the keyboard.
 func (l *List) SetFocused(focused bool) { l.focused = focused }
+
+// SetCompact switches between two-line rows and one-line ones.
+func (l *List) SetCompact(compact bool) { l.compact = compact }
 
 // SetSize sets the height and width of the list.
 func (l *List) SetSize(width, height int) {
@@ -848,6 +854,119 @@ func (r *InstanceRenderer) busyMark(i *session.Instance, bg lipgloss.TerminalCol
 	return workingStyle.Background(bg).Render(mark), runewidth.StringWidth(mark)
 }
 
+// RenderCompact draws a session on one line, for the compact mode and the
+// strip above the window: the glyph, the title, the branch, and at the right
+// the marks the two-line row spreads over its lines.
+//
+//	● TASK-6664 signals tab strip  ⎇ TASK-6664          ▸ ✓ ↑4 +11 −2  2h
+func (r *InstanceRenderer) RenderCompact(i *session.Instance, selected bool, isLast bool) string {
+	return r.compactAt(i, selected, isLast, r.width)
+}
+
+func (r *InstanceRenderer) compactAt(i *session.Instance, selected bool, isLast bool, width int) string {
+	total := width
+	titleS, descS := titleStyle, listDescStyle
+	if selected {
+		titleS, descS = selectedTitleStyle, selectedDescStyle
+	} else if settled(i) {
+		titleS = titleS.Foreground(theme.Color(theme.Muted))
+	}
+	bg := titleS.GetBackground()
+	paint := func(text string) string { return lipgloss.NewStyle().Background(bg).Render(text) }
+
+	beingNamed := r.naming && isLast
+	glyph := r.stateGlyph(i, beingNamed, selected, bg)
+
+	// The marks at the right, in a fixed order, each with the space before it.
+	var marks []string
+	width -= 3 + 1 // the glyph column and the trailing cell
+	add := func(styled string, plainWidth int) {
+		if styled == "" {
+			return
+		}
+		marks = append(marks, paint(" ")+styled)
+		width -= plainWidth + 1
+	}
+	if busy, w := r.busyMark(i, bg); w > 0 {
+		add(busy, w-1) // busyMark carries its own trailing space
+		width++
+	}
+	if dev, w := r.devBadge(i, bg); w > 0 {
+		add(dev, w)
+	}
+	if plain, styled := ciBadgeAt(i.GetCIStatus(), bg, badgeWordsNone); plain != "" {
+		add(styled, runewidth.StringWidth(plain))
+	}
+	if plain, styled := syncBadge(i.GetUpstreamStatus(), bg, false); plain != "" {
+		add(styled, runewidth.StringWidth(plain))
+	}
+	if st := i.GetDiffStats(); st != nil && st.Error == nil && !st.IsEmpty() {
+		plain := "+" + compactCount(st.Added) + " -" + compactCount(st.Removed)
+		add(addedLinesStyle.Background(bg).Render("+"+compactCount(st.Added))+paint(" ")+
+			removedLinesStyle.Background(bg).Render("-"+compactCount(st.Removed)), runewidth.StringWidth(plain))
+	}
+	if age, w := r.rowAge(i, beingNamed, bg); w > 0 {
+		marks = append(marks, age) // rowAge carries its own leading space
+		width -= w
+	}
+
+	// What is left is the title and the branch, the title first: it is the
+	// row's identity, and the branch is dropped when it only echoes it.
+	titleText := i.Title
+	showPlaceholder := beingNamed && titleText == ""
+	if showPlaceholder {
+		titleText = namingPlaceholder
+	}
+	branch := ""
+	if beingNamed {
+		branch = r.branchPreview
+	} else if !i.NoWorktree() && !branchEchoesTitle(i.DisplayBranch(), i.Title) {
+		branch = i.DisplayBranch()
+	} else if i.NoWorktree() {
+		branch = filepath.Base(i.Path)
+	}
+	cursor := 0
+	if beingNamed {
+		cursor = runewidth.StringWidth(namingCursor)
+	}
+	titleWidth := runewidth.StringWidth(titleText) + cursor
+	branchCell := 0
+	if branch != "" {
+		branchCell = 2 + 2 + runewidth.StringWidth(branch) // two spaces, the glyph and its space
+	}
+	if titleWidth+branchCell > width {
+		// The branch gives way first, then the title is cut.
+		room := width - titleWidth
+		if room < 2+2+minBranchWidth {
+			branch, branchCell = "", 0
+		} else {
+			branch = elideMiddle(branch, room-4)
+			branchCell = 4 + runewidth.StringWidth(branch)
+		}
+	}
+	if titleWidth > width-branchCell && width-branchCell-cursor > 0 {
+		titleText = elideMiddle(titleText, width-branchCell-cursor)
+	}
+	if showPlaceholder {
+		titleText = namingPlaceholderStyle.Background(bg).Render(titleText)
+	} else {
+		titleText = titleS.Render(titleText)
+	}
+	if beingNamed {
+		titleText += namingCursorStyle.Background(bg).Render(namingCursor)
+	}
+	line := paint(" ") + glyph + titleText
+	if branch != "" {
+		icon := branchIcon
+		if i.NoWorktree() && !beingNamed {
+			icon = repoIcon
+		}
+		line += paint("  ") + descS.Render(icon+" "+branch)
+	}
+	line = padTo(line, total-lipgloss.Width(strings.Join(marks, ""))-1, bg) + strings.Join(marks, "") + paint(" ")
+	return padTo(clip(line, total), total, bg)
+}
+
 // prSettled reports whether the session's pull request is merged or closed.
 func prSettled(i *session.Instance) bool {
 	st := i.GetCIStatus().State
@@ -1301,10 +1420,16 @@ func (l *List) rows(width, height int) string {
 	heights := make([]int, len(l.items))
 	total := 0
 	for i, item := range l.items {
-		rendered[i] = l.renderer.Render(item, i+1, i == l.selectedIdx, len(l.repos) > 1, i == len(l.items)-1)
-		// The blank line that separates one session from the next belongs to the
-		// session above it, so a window's height is the sum of what it draws.
-		heights[i] = strings.Count(rendered[i], "\n") + 2
+		if l.compact {
+			rendered[i] = l.renderer.RenderCompact(item, i == l.selectedIdx, i == len(l.items)-1)
+			heights[i] = 1
+		} else {
+			rendered[i] = l.renderer.Render(item, i+1, i == l.selectedIdx, len(l.repos) > 1, i == len(l.items)-1)
+			// The blank line that separates one session from the next belongs to
+			// the session above it, so a window's height is the sum of what it
+			// draws.
+			heights[i] = strings.Count(rendered[i], "\n") + 2
+		}
 		total += heights[i]
 	}
 
@@ -1322,7 +1447,11 @@ func (l *List) rows(width, height int) string {
 	for i := start; i < end; i++ {
 		b.WriteString(rendered[i])
 		if i != end-1 {
-			b.WriteString("\n\n")
+			if l.compact {
+				b.WriteString("\n")
+			} else {
+				b.WriteString("\n\n")
+			}
 		}
 	}
 	if end < len(l.items) {

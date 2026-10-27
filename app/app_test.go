@@ -522,6 +522,7 @@ type fakeAppState struct {
 	devStack  string
 	devWrites int
 	killed    []config.KilledSession
+	modes     map[string]string
 }
 
 func (f *fakeAppState) GetHelpScreensSeen() uint32                { return f.helpSeen }
@@ -529,6 +530,14 @@ func (f *fakeAppState) SetHelpScreensSeen(s uint32) error         { f.helpSeen =
 func (f *fakeAppState) GetDevStackInstance() string               { return f.devStack }
 func (f *fakeAppState) SetDevStackInstance(t string) error        { f.devStack = t; f.devWrites++; return nil }
 func (f *fakeAppState) GetKilledSessions() []config.KilledSession { return f.killed }
+func (f *fakeAppState) GetLayoutMode(bucket string) string        { return f.modes[bucket] }
+func (f *fakeAppState) SetLayoutMode(bucket, mode string) error {
+	if f.modes == nil {
+		f.modes = map[string]string{}
+	}
+	f.modes[bucket] = mode
+	return nil
+}
 func (f *fakeAppState) AddKilledSession(k config.KilledSession) error {
 	f.killed = append([]config.KilledSession{k}, f.killed...)
 	return nil
@@ -579,8 +588,18 @@ func TestAFailedStartClearsTheRecordedSession(t *testing.T) {
 // every frame came out one row taller than the terminal and the whole thing
 // scrolled by one on each redraw.
 func TestTheViewIsExactlyTheTerminalHeight(t *testing.T) {
-	for _, size := range [][2]int{{150, 24}, {150, 30}, {150, 40}, {110, 30}, {90, 26}} {
+	for _, size := range [][2]int{{150, 24}, {150, 30}, {150, 40}, {110, 30}, {90, 26}, {80, 24}, {60, 20}} {
 		h := newSizedHome(t, size[0], size[1])
+		for _, window := range []bool{false, true} {
+			h.setWindowFocus(window)
+			lines := strings.Split(h.View(), "\n")
+			require.Len(t, lines, size[1], "%dx%d window=%v", size[0], size[1], window)
+			for i, line := range lines {
+				require.LessOrEqual(t, lipgloss.Width(line), size[0],
+					"%dx%d window=%v row %d overruns the terminal", size[0], size[1], window, i)
+			}
+		}
+		h.setWindowFocus(false)
 		lines := strings.Split(h.View(), "\n")
 		require.Len(t, lines, size[1], "%dx%d", size[0], size[1])
 		for i, line := range lines {

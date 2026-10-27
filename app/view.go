@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/AlexanderWeismannn/adroit/log"
+	"github.com/AlexanderWeismannn/adroit/ui"
 	"github.com/AlexanderWeismannn/adroit/ui/overlay"
 
 	"github.com/charmbracelet/lipgloss"
@@ -14,7 +15,16 @@ func (m *home) View() string {
 	// The header carries the counts the list's title used to.
 	m.header.Sessions = m.list.NumInstances()
 	m.header.NeedYou = m.list.AttentionCount()
-	listAndPreview := lipgloss.JoinHorizontal(lipgloss.Top, m.list.String(), m.tabbedWindow.String())
+	var listAndPreview string
+	switch {
+	case m.layout.Mode == ui.Compact && m.windowFocused:
+		// The window, with the session it shows named on the strip above it.
+		listAndPreview = lipgloss.JoinVertical(lipgloss.Left, m.list.Strip(m.layout.Strip.W), m.tabbedWindow.String())
+	case m.layout.Mode == ui.Compact:
+		listAndPreview = m.list.String()
+	default:
+		listAndPreview = lipgloss.JoinHorizontal(lipgloss.Top, m.list.String(), m.tabbedWindow.String())
+	}
 
 	// Left, not centred: the bar spans the terminal and the panes stop just
 	// short of it, so centring shifted the whole frame right by the difference

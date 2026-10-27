@@ -40,6 +40,10 @@ type AppState interface {
 	GetKilledSessions() []KilledSession
 	// AddKilledSession records a session that was just killed
 	AddKilledSession(killed KilledSession) error
+	// GetLayoutMode returns the layout mode chosen for a width bucket ("" when
+	// none was), and SetLayoutMode records one.
+	GetLayoutMode(bucket string) string
+	SetLayoutMode(bucket, mode string) error
 }
 
 // maxKilledSessions bounds the restore list. It is a record of accidents and
@@ -100,6 +104,10 @@ type State struct {
 	// KilledSessions are the sessions that have been killed and can still be
 	// restored, most recently killed first.
 	KilledSessions []KilledSession `json:"killed_sessions,omitempty"`
+	// LayoutModes is the layout mode chosen with the mode key, per width bucket
+	// (the mode the width would otherwise pick), so a terminal that is wide
+	// enough for three columns can be kept at two.
+	LayoutModes map[string]string `json:"layout_modes,omitempty"`
 
 	// unsaveable is set on the defaults handed back for a state file that exists
 	// but could not be read. Saving them would replace every session on record
@@ -229,6 +237,20 @@ func (s *State) GetDevStackInstance() string {
 // title means no stack is running.
 func (s *State) SetDevStackInstance(title string) error {
 	s.DevStackInstance = title
+	return SaveState(s)
+}
+
+// GetLayoutMode returns the mode chosen for a width bucket, or "".
+func (s *State) GetLayoutMode(bucket string) string {
+	return s.LayoutModes[bucket]
+}
+
+// SetLayoutMode records the mode chosen for a width bucket.
+func (s *State) SetLayoutMode(bucket, mode string) error {
+	if s.LayoutModes == nil {
+		s.LayoutModes = map[string]string{}
+	}
+	s.LayoutModes[bucket] = mode
 	return SaveState(s)
 }
 

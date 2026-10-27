@@ -56,7 +56,7 @@ func TestOfferedLeadsWithWhatMattersMost(t *testing.T) {
 		t.Fatalf("session = %v, want waiting, kill, attach", session)
 	}
 	session, tools, app := Offered(Ctx{})
-	if len(session) != 0 || len(tools) != 0 || len(app) != 6 || app[0] != KeyNew || app[1] != KeyPrompt {
+	if len(session) != 0 || len(tools) != 0 || len(app) != 7 || app[0] != KeyNew || app[1] != KeyPrompt {
 		t.Fatalf("empty list: session %v tools %v app %v", session, tools, app)
 	}
 	ctx := Ctx{HasInstance: true, Started: true, Paused: true}

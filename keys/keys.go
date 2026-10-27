@@ -58,6 +58,11 @@ const (
 	// KeyLeft and KeyRight switch tabs.
 	KeyLeft
 	KeyRight
+	// KeyMode cycles the layout mode; KeyPrevSession and KeyNextSession move
+	// the selection without leaving the window.
+	KeyMode
+	KeyPrevSession
+	KeyNextSession
 
 	// Captions for the bar while the window owns the keyboard: what the arrow
 	// keys do there, and the way back to the list.
@@ -67,6 +72,7 @@ const (
 	KeyPaneTabs
 	KeyPaneAttach
 	KeyPaneList
+	KeyPaneSession
 	KeyPaneHelp
 	KeyPaneQuit
 )
@@ -168,6 +174,8 @@ var Table = []Binding{
 	{Name: KeyPageDown, Keys: []string{"pgdown"}, Key: "pgdn", Label: "page down"},
 	{Name: KeyLeft, Keys: []string{"left", "h"}, Key: "←/h", Label: "previous tab"},
 	{Name: KeyRight, Keys: []string{"right", "l"}, Key: "→/l", Label: "next tab"},
+	{Name: KeyPrevSession, Keys: []string{"<"}, Key: "<", Label: "previous session"},
+	{Name: KeyNextSession, Keys: []string{">"}, Key: ">", Label: "next session"},
 
 	// -- the session --
 
@@ -257,6 +265,8 @@ var Table = []Binding{
 	{Name: KeyRestore, Keys: []string{"R"}, Key: "R", Label: "restore", Group: GroupApp,
 		Help: "Restore a killed session's conversation in a fresh workspace",
 		When: func(c Ctx) bool { return c.Restorable && !c.Loading }},
+	{Name: KeyMode, Keys: []string{"m"}, Key: "m", Label: "mode", Group: GroupApp,
+		Help: "Cycle the layout: compact, split, wide (remembered for this width)"},
 	{Name: KeySettings, Keys: []string{"s"}, Key: "s", Label: "settings", Group: GroupApp,
 		Help: "Settings: agents and their API keys, workspaces, options"},
 	{Name: KeyTheme, Keys: []string{"t"}, Key: "t", Label: "theme", Group: GroupApp,
@@ -282,6 +292,7 @@ var Table = []Binding{
 	{Name: KeyPaneTabs, Key: "←→", Label: "tab", Group: GroupPane},
 	{Name: KeyPaneAttach, Key: "↵", Label: "attach", Group: GroupPane},
 	{Name: KeyPaneList, Key: "tab", Label: "list", Group: GroupPane},
+	{Name: KeyPaneSession, Key: "<>", Label: "session", Group: GroupPane},
 	{Name: KeyPaneHelp, Key: "?", Label: "help", Group: GroupPane},
 	{Name: KeyPaneQuit, Key: "q", Label: "quit", Group: GroupPane},
 }
@@ -438,6 +449,8 @@ var HelpSections = []HelpSection{
 		{Name: KeyTheme},
 		{Name: KeyTab},
 		{Key: "←/h, →/l", Desc: "Switch between preview, diff, terminal and run tabs"},
+		{Key: "<, >", Desc: "Previous or next session, without leaving the window"},
+		{Name: KeyMode},
 		{Key: "shift-↓/↑", Desc: "Scroll in preview/diff/terminal/run view"},
 		{Key: "pgup/pgdn", Desc: "Scroll a page at a time; esc returns to the live view"},
 		{Name: KeyQuit},

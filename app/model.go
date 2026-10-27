@@ -147,8 +147,11 @@ type home struct {
 	errBox *ui.ErrBox
 	// global spinner instance. we plumb this down to where it's needed
 	spinner spinner.Model
-	// layout is where every component goes for the current terminal size.
-	layout ui.Rects
+	// layout is where every component goes for the current terminal size and
+	// mode. The mode is the width's pick unless the mode key chose another for
+	// this width bucket, which AppState remembers.
+	layout     ui.Rects
+	termHeight int
 	// fitWarnedWidth is the last width at which fitToTerminal had to cut a row,
 	// logged once per width rather than once per frame.
 	fitWarnedWidth int
@@ -280,17 +283,47 @@ func (m *home) updateHandleWindowSizeEvent(msg tea.WindowSizeMsg) {
 	// Every component gets its rect from the layout; nothing measures the
 	// terminal for itself. The rows add up exactly: a frame composed one row
 	// taller than the terminal scrolls the whole view by one on every redraw.
-	r := ui.Layout(msg.Width, msg.Height, ui.Split)
+	m.termHeight = msg.Height
+	m.applyLayout()
+}
+
+// layoutMode is the mode for the current width: the width's own pick, unless
+// the mode key chose another for this bucket.
+func (m *home) layoutMode() ui.Mode {
+	bucket := ui.Pick(m.termWidth)
+	if m.appState != nil {
+		switch m.appState.GetLayoutMode(bucket.String()) {
+		case ui.Compact.String():
+			return ui.Compact
+		case ui.Split.String():
+			return ui.Split
+		case ui.Wide.String():
+			return ui.Wide
+		}
+	}
+	return bucket
+}
+
+// applyLayout lays the components out for the terminal's size and the mode.
+func (m *home) applyLayout() {
+	mode := m.layoutMode()
+	// Wide draws as split until the status column exists.
+	drawn := mode
+	if drawn == ui.Wide {
+		drawn = ui.Split
+	}
+	r := ui.Layout(m.termWidth, m.termHeight, drawn)
 	m.layout = r
 	m.header.SetWidth(r.Header.W)
-	m.header.Mode, m.header.Cols, m.header.Rows = r.Mode.String(), msg.Width, msg.Height
+	m.header.Mode, m.header.Cols, m.header.Rows = mode.String(), m.termWidth, m.termHeight
 	m.errBox.SetSize(r.Notice.W, r.Notice.H)
 
+	m.list.SetCompact(r.Mode == ui.Compact)
 	m.tabbedWindow.SetSize(r.Window.W, r.Window.H)
 	m.list.SetSize(r.List.W, r.List.H)
 
 	if m.overlay != nil {
-		m.overlay.resize(m, msg.Width, msg.Height)
+		m.overlay.resize(m, m.termWidth, m.termHeight)
 	}
 
 	previewWidth, previewHeight := m.tabbedWindow.GetPreviewSize()
@@ -298,6 +331,18 @@ func (m *home) updateHandleWindowSizeEvent(msg tea.WindowSizeMsg) {
 		log.ErrorLog.Print(err)
 	}
 	m.menu.SetSize(r.Bar.W, r.Bar.H)
+}
+
+// cycleMode moves to the next layout mode and remembers it for this width.
+func (m *home) cycleMode() tea.Cmd {
+	next := (m.layoutMode() + 1) % 3
+	if m.appState != nil {
+		if err := m.appState.SetLayoutMode(ui.Pick(m.termWidth).String(), next.String()); err != nil {
+			return m.handleError(err)
+		}
+	}
+	m.applyLayout()
+	return tea.Batch(tea.ClearScreen, m.instanceChanged(), m.handleNotice(fmt.Sprintf("%s layout", next)))
 }
 
 func (m *home) Init() tea.Cmd {

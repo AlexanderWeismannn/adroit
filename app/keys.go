@@ -349,6 +349,14 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 	case keys.KeyTab:
 		m.setWindowFocus(!m.windowFocused)
 		return m, m.instanceChanged()
+	case keys.KeyMode:
+		return m, m.cycleMode()
+	case keys.KeyPrevSession:
+		m.list.Up()
+		return m, m.instanceChanged()
+	case keys.KeyNextSession:
+		m.list.Down()
+		return m, m.instanceChanged()
 	case keys.KeyLeft:
 		m.tabbedWindow.Prev()
 		m.menu.SetActiveTab(m.tabbedWindow.GetActiveTab())
