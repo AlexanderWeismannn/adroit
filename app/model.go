@@ -137,6 +137,11 @@ type home struct {
 
 	// header is the strip along the top: where you are, the counts, the mode.
 	header *ui.Header
+	// side is the status column of the wide layout.
+	side *ui.Side
+	// notices are each session's recent notices, by title, newest first, for
+	// the status column. In memory only: the line is about what just happened.
+	notices map[string][]ui.Notice
 	// list displays the list of instances
 	list *ui.List
 	// menu displays the bottom menu
@@ -203,6 +208,7 @@ func newHome(ctx context.Context, program string, autoYes bool) *home {
 		spinner: spinner.New(spinner.WithSpinner(spinner.MiniDot)),
 		menu:    ui.NewMenu(),
 		header:  ui.NewHeader(),
+		side:    ui.NewSide(),
 		tabbedWindow: ui.NewTabbedWindow(
 			ui.NewPreviewPane(), ui.NewDiffPane(), ui.NewTerminalPane(), ui.NewRunPane(devStack)),
 		errBox:            ui.NewErrBox(),
@@ -221,7 +227,7 @@ func newHome(ctx context.Context, program string, autoYes bool) *home {
 	// rather than per keystroke. A directory that is not a repository leaves the
 	// global rules in place; the creation itself will say so.
 	h.namingRepo, _ = git.RepoRoot(".")
-	h.header.Repo = shortenHome(h.namingRepo)
+	h.header.Repo = ui.ShortenHome(h.namingRepo)
 	// The repository's own branch, read once: it is where new sessions branch
 	// from, and the header says so. A detached HEAD leaves it blank.
 	h.header.Base, _ = git.CurrentBranch(h.namingRepo)
@@ -307,12 +313,7 @@ func (m *home) layoutMode() ui.Mode {
 // applyLayout lays the components out for the terminal's size and the mode.
 func (m *home) applyLayout() {
 	mode := m.layoutMode()
-	// Wide draws as split until the status column exists.
-	drawn := mode
-	if drawn == ui.Wide {
-		drawn = ui.Split
-	}
-	r := ui.Layout(m.termWidth, m.termHeight, drawn)
+	r := ui.Layout(m.termWidth, m.termHeight, mode)
 	m.layout = r
 	m.header.SetWidth(r.Header.W)
 	m.header.Mode, m.header.Cols, m.header.Rows = mode.String(), m.termWidth, m.termHeight
@@ -321,6 +322,9 @@ func (m *home) applyLayout() {
 	m.list.SetCompact(r.Mode == ui.Compact)
 	m.tabbedWindow.SetSize(r.Window.W, r.Window.H)
 	m.list.SetSize(r.List.W, r.List.H)
+	if m.side != nil {
+		m.side.SetSize(r.Side.W, r.Side.H)
+	}
 
 	if m.overlay != nil {
 		m.overlay.resize(m, m.termWidth, m.termHeight)
@@ -675,21 +679,4 @@ func (m *home) handleQuit() (tea.Model, tea.Cmd) {
 		return m, m.handleError(err)
 	}
 	return m, tea.Quit
-}
-
-// shortenHome writes a path the way it is typed at a shell: ~ for the home
-// directory.
-func shortenHome(path string) string {
-	if path == "" {
-		return ""
-	}
-	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		if path == home {
-			return "~"
-		}
-		if strings.HasPrefix(path, home+string(filepath.Separator)) {
-			return "~" + path[len(home):]
-		}
-	}
-	return path
 }

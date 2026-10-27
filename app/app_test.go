@@ -588,7 +588,7 @@ func TestAFailedStartClearsTheRecordedSession(t *testing.T) {
 // every frame came out one row taller than the terminal and the whole thing
 // scrolled by one on each redraw.
 func TestTheViewIsExactlyTheTerminalHeight(t *testing.T) {
-	for _, size := range [][2]int{{150, 24}, {150, 30}, {150, 40}, {110, 30}, {90, 26}, {80, 24}, {60, 20}} {
+	for _, size := range [][2]int{{150, 24}, {150, 30}, {150, 40}, {110, 30}, {90, 26}, {80, 24}, {60, 20}, {170, 30}, {200, 50}} {
 		h := newSizedHome(t, size[0], size[1])
 		for _, window := range []bool{false, true} {
 			h.setWindowFocus(window)
@@ -657,7 +657,7 @@ func newSizedHome(t *testing.T, w, hgt int) *home {
 	stack := dev.New(nil)
 	h := &home{
 		ctx: context.Background(), appConfig: config.DefaultConfig(),
-		menu: ui.NewMenu(), header: ui.NewHeader(), errBox: ui.NewErrBox(), spinner: spin, devStack: stack,
+		menu: ui.NewMenu(), header: ui.NewHeader(), side: ui.NewSide(), errBox: ui.NewErrBox(), spinner: spin, devStack: stack,
 		tabbedWindow: ui.NewTabbedWindow(
 			ui.NewPreviewPane(), ui.NewDiffPane(), ui.NewTerminalPane(), ui.NewRunPane(stack)),
 	}

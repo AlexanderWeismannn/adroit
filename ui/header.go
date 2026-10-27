@@ -2,6 +2,8 @@ package ui
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/AlexanderWeismannn/adroit/theme"
@@ -78,4 +80,21 @@ func (h *Header) String() string {
 		return clip(left, h.width)
 	}
 	return left + strings.Repeat(" ", gap) + right
+}
+
+// ShortenHome writes a path the way it is typed at a shell: ~ for the home
+// directory.
+func ShortenHome(path string) string {
+	if path == "" {
+		return ""
+	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		if path == home {
+			return "~"
+		}
+		if strings.HasPrefix(path, home+string(filepath.Separator)) {
+			return "~" + path[len(home):]
+		}
+	}
+	return path
 }

@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/AlexanderWeismannn/adroit/log"
+	"github.com/AlexanderWeismannn/adroit/ui"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -35,5 +36,28 @@ func (m *home) hideMessageAfter(d time.Duration) tea.Cmd {
 func (m *home) handleNotice(notice string) tea.Cmd {
 	log.InfoLog.Printf("%s", notice)
 	m.errBox.SetNotice(notice)
+	m.recordNotice(notice)
 	return m.hideMessageAfter(messageLifetime(notice))
+}
+
+// recordNotice keeps the notice for the status column, against the session
+// it was about -- the selected one, which is what every notice is raised for.
+// The last ten, newest first.
+func (m *home) recordNotice(notice string) {
+	if m.list == nil {
+		return
+	}
+	selected := m.list.GetSelectedInstance()
+	if selected == nil {
+		return
+	}
+	if m.notices == nil {
+		m.notices = map[string][]ui.Notice{}
+	}
+	const keep = 10
+	entries := append([]ui.Notice{{Text: notice, At: time.Now()}}, m.notices[selected.Title]...)
+	if len(entries) > keep {
+		entries = entries[:keep]
+	}
+	m.notices[selected.Title] = entries
 }

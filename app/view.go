@@ -22,6 +22,9 @@ func (m *home) View() string {
 		listAndPreview = lipgloss.JoinVertical(lipgloss.Left, m.list.Strip(m.layout.Strip.W), m.tabbedWindow.String())
 	case m.layout.Mode == ui.Compact:
 		listAndPreview = m.list.String()
+	case m.layout.Mode == ui.Wide && m.side != nil:
+		m.syncSide()
+		listAndPreview = lipgloss.JoinHorizontal(lipgloss.Top, m.list.String(), m.tabbedWindow.String(), m.side.String())
 	default:
 		listAndPreview = lipgloss.JoinHorizontal(lipgloss.Top, m.list.String(), m.tabbedWindow.String())
 	}
@@ -77,4 +80,17 @@ func (m *home) fitToTerminal(view string) string {
 		log.WarningLog.Printf("a row overran the terminal at %d columns and was cut", m.termWidth)
 	}
 	return strings.Join(lines, "\n")
+}
+
+// syncSide points the status column at the selected session and what is known
+// about it.
+func (m *home) syncSide() {
+	selected := m.list.GetSelectedInstance()
+	m.side.SetInstance(selected)
+	m.side.SetDevStack(m.devStack.Snapshot())
+	if selected != nil {
+		m.side.SetNotices(m.notices[selected.Title])
+	} else {
+		m.side.SetNotices(nil)
+	}
 }
