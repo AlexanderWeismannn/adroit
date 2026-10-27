@@ -1,9 +1,10 @@
 package overlay
 
 import (
+	"strings"
+
 	"github.com/AlexanderWeismannn/adroit/config"
 	"github.com/AlexanderWeismannn/adroit/theme"
-	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"

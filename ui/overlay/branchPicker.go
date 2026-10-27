@@ -1,8 +1,9 @@
 package overlay
 
 import (
-	"github.com/AlexanderWeismannn/adroit/theme"
 	"strings"
+
+	"github.com/AlexanderWeismannn/adroit/theme"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -210,7 +211,7 @@ func (bp *BranchPicker) Render() string {
 	if bp.focused {
 		cursor := bp.filter + "█"
 		s.WriteString(bpFilterStyle.Render(" (filter: " + cursor + ")"))
-		s.WriteString(bpDimStyle.Render("   type to filter · ↑↓/tab select · enter choose · ctrl+s start"))
+		s.WriteString(bpDimStyle.Render("   filter · ↑↓ select · enter choose · ctrl+s start"))
 	} else {
 		if bp.filter != "" {
 			s.WriteString(bpDimStyle.Render(" (filter: " + bp.filter + ")"))

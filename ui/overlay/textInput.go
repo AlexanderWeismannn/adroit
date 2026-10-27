@@ -1,9 +1,10 @@
 package overlay
 
 import (
+	"strings"
+
 	"github.com/AlexanderWeismannn/adroit/config"
 	"github.com/AlexanderWeismannn/adroit/theme"
-	"strings"
 
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
@@ -420,12 +421,6 @@ func (t *TextInputOverlay) render() string {
 	//
 	// The title's own bottom margin is dropped and the blank line written here
 	// instead, or the hint lands below the margin rather than next to the title.
-	title := tiTitleStyle.UnsetMarginBottom().Render(t.Title)
-	if t.numStops > 2 {
-		title = lipgloss.JoinHorizontal(lipgloss.Bottom, title,
-			tiHintStyle.Render("   tab: next field · esc: cancel"))
-	}
-	content += title + "\n\n"
 	content += t.textarea.View() + "\n\n"
 
 	// Render branch picker if present, with dividers
@@ -449,5 +444,9 @@ func (t *TextInputOverlay) render() string {
 	}
 	content += enterButton
 
-	return tiStyle.Render(content)
+	footer := Keys(Key{"ctrl+s", "submit"}, Key{"esc", "cancel"})
+	if t.numStops > 2 {
+		footer = Keys(Key{"tab", "next field"}, Key{"ctrl+s", "submit"}, Key{"esc", "cancel"})
+	}
+	return Frame(t.width, t.Title, content, footer, theme.Color(theme.Accent))
 }

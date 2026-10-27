@@ -72,6 +72,9 @@ type Rects struct {
 	Side Rect
 	// Bar is the context bar; Notice the line under it for notices and errors.
 	Bar, Notice Rect
+	// Overlay is the size a form-shaped overlay (prompt, help, settings) is
+	// given; Dialog the width of a yes/no one.
+	Overlay, Dialog Rect
 }
 
 const (
@@ -94,6 +97,11 @@ func Layout(width, height int, mode Mode) Rects {
 	width, height = max(width, 0), max(height, 0)
 
 	r.Header = Rect{0, 0, width, min(headerRows, height)}
+	// Six tenths of the terminal for a form, within sense: never narrower than
+	// the terminal allows and never so wide a line of prose is unreadable. The
+	// dialog is narrower and fits an 80-column terminal with room to spare.
+	r.Overlay = Rect{0, 0, min(max(int(float32(width)*0.6), min(width-4, 44)), 100), max(int(float32(height)*0.4), 1)}
+	r.Dialog = Rect{0, 0, min(56, max(width-4, 20)), 0}
 	top := r.Header.H
 	// The bar and the notice line take the last rows; everything else is content.
 	content := max(height-top-barRows-noticeRows, 0)

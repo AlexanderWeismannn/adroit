@@ -97,7 +97,7 @@ func TestConfirmationModalKeyHandling(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Reset state
-			h.confirmAction("Kill session?", nil)
+			h.confirmAction("Kill session", "Kill it?", "kill", nil)
 
 			// Create key message
 			var keyMsg tea.KeyMsg
@@ -341,7 +341,7 @@ func TestConfirmedActionMessageReachesUpdateLoop(t *testing.T) {
 		h := newHomeForConfirm()
 		actionErr := fmt.Errorf("instance test-session is currently checked out")
 
-		h.confirmAction("[!] Kill session 'test-session'?", func() tea.Msg { return actionErr })
+		h.confirmAction("Kill session", "Kill test-session?", "kill", func() tea.Msg { return actionErr })
 		confirm, open := h.overlay.(*confirmScreen)
 		require.True(t, open)
 
@@ -361,7 +361,7 @@ func TestConfirmedActionMessageReachesUpdateLoop(t *testing.T) {
 		h := newHomeForConfirm()
 		ran := make(chan struct{})
 
-		h.confirmAction("[!] Kill session 'test-session'?", func() tea.Msg {
+		h.confirmAction("Kill session", "Kill test-session?", "kill", func() tea.Msg {
 			close(ran)
 			return nil
 		})
@@ -386,7 +386,7 @@ func TestConfirmedActionMessageReachesUpdateLoop(t *testing.T) {
 		h := newHomeForConfirm()
 		called := false
 
-		h.confirmAction("[!] Kill session 'test-session'?", func() tea.Msg {
+		h.confirmAction("Kill session", "Kill test-session?", "kill", func() tea.Msg {
 			called = true
 			return fmt.Errorf("should never run")
 		})

@@ -405,11 +405,11 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 		}
 
 		// Show confirmation modal
-		message := fmt.Sprintf("[!] Kill session '%s'?", selected.Title)
+		message := fmt.Sprintf("Kill %s?", selected.Title)
 		if detail := killDetail(selected); detail != "" {
 			message += "\n\n" + detail
 		}
-		return m, m.confirmAction(message, killAction)
+		return m, m.confirmAction("Kill session", message, "kill", killAction)
 	case keys.KeySubmit:
 		selected := m.list.GetSelectedInstance()
 		if selected == nil || selected.Status == session.Loading {
@@ -436,8 +436,8 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 		}
 
 		// Show confirmation modal
-		message := fmt.Sprintf("[!] Push changes from session '%s'?", selected.Title)
-		return m, m.confirmAction(message, pushAction)
+		message := fmt.Sprintf("Commit everything in %s's worktree and push its branch?", selected.Title)
+		return m, m.confirmAction("Push", message, "push", pushAction)
 	case keys.KeyCheckout:
 		selected := m.list.GetSelectedInstance()
 		if selected == nil || selected.Status == session.Loading {

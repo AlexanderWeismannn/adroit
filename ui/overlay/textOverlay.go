@@ -17,7 +17,8 @@ type TextOverlay struct {
 	// help screen gates -- attaching to a session -- must not run inside Update.
 	// See home.attachCmd.
 	OnDismiss func() tea.Cmd
-	// Content to display in the overlay
+	// Title goes in the border; content is the card.
+	Title   string
 	content string
 
 	width int
@@ -48,15 +49,12 @@ func (t *TextOverlay) HandleKeyPress(msg tea.KeyMsg) (bool, tea.Cmd) {
 
 // Render renders the text overlay
 func (t *TextOverlay) Render(opts ...WhitespaceOption) string {
-	// Create styles
-	style := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(theme.Color(theme.Accent)).
-		Padding(1, 2).
-		Width(t.width)
-
-	// Apply the border style and return
-	return style.Render(t.content)
+	width := t.width
+	if width <= 0 {
+		// Unsized: as wide as the card, like the border used to be.
+		width = lipgloss.Width(t.content) + 6
+	}
+	return Frame(width, t.Title, t.content, Keys(Key{"any key", "close"}), theme.Color(theme.Accent))
 }
 
 func (t *TextOverlay) SetWidth(width int) {

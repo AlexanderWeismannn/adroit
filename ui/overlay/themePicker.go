@@ -1,8 +1,9 @@
 package overlay
 
 import (
-	"github.com/AlexanderWeismannn/adroit/theme"
 	"strings"
+
+	"github.com/AlexanderWeismannn/adroit/theme"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -117,9 +118,6 @@ func (t *ThemePicker) jumpTo(prefix string) PickerAction {
 
 func (t *ThemePicker) Render() string {
 	var body strings.Builder
-	body.WriteString(themeTitleStyle.Render("Theme"))
-	body.WriteString(themeHintStyle.Render("   ↑↓ preview · enter keep · esc cancel"))
-	body.WriteString("\n\n")
 
 	width := 0
 	for _, name := range t.names {
@@ -150,7 +148,8 @@ func (t *ThemePicker) Render() string {
 		}
 	}
 
-	return themeBorderStyle.Render(body.String())
+	return Frame(lipgloss.Width(body.String())+6, "Theme",
+		body.String(), Keys(Key{"↑↓", "preview"}, Key{"enter", "keep"}, Key{"esc", "cancel"}), theme.Color(theme.Accent))
 }
 
 func padRight(s string, width int) string {

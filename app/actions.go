@@ -338,17 +338,17 @@ func (m *home) updateFromRemote() tea.Cmd {
 		// A force-push upstream, in the ordinary case: no merge can reconcile the
 		// two histories, so the only way to the remote's version is to abandon
 		// ours. Named in full, since it is the one action here that loses work.
-		message := fmt.Sprintf("[!] %s diverged: %d commit(s) here are not on it.\nReset '%s' to the remote and discard them?",
+		message := fmt.Sprintf("%s diverged: %d commit(s) here are not on it.\n\nReset %s to the remote and discard them? They cannot be brought back.",
 			status.Ref, status.Ahead, selected.Title)
-		return m.confirmAction(message, func() tea.Msg {
+		return m.confirmAction("Reset to remote", message, "reset", func() tea.Msg {
 			return runUpdateMsg{instance: selected, reset: true}
 		})
 	case !status.Stale():
 		return m.handleError(fmt.Errorf("%q is already up to date with %s", selected.Title, status.Ref))
 	default:
-		message := fmt.Sprintf("[!] Pull %d new commit(s) from %s into '%s'?",
+		message := fmt.Sprintf("Pull %d new commit(s) from %s into %s? They land in a tree the agent may be working in.",
 			status.Behind, status.Ref, selected.Title)
-		return m.confirmAction(message, func() tea.Msg {
+		return m.confirmAction("Update from remote", message, "pull", func() tea.Msg {
 			return runUpdateMsg{instance: selected}
 		})
 	}

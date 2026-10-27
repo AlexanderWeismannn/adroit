@@ -1,9 +1,10 @@
 package overlay
 
 import (
-	"github.com/AlexanderWeismannn/adroit/config"
 	"strings"
 	"testing"
+
+	"github.com/AlexanderWeismannn/adroit/config"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/stretchr/testify/require"
@@ -53,7 +54,7 @@ func TestBranchPickerAnnouncesItself(t *testing.T) {
 
 	o.FocusBranchPicker()
 	focused := o.Render()
-	require.Contains(t, focused, "type to filter")
+	require.Contains(t, focused, "filter ·")
 	require.Contains(t, focused, "ctrl+s start")
 	require.NotContains(t, focused, "tab to choose an existing branch",
 		"once focused, the hint to reach it is stale")
@@ -63,9 +64,10 @@ func TestBranchPickerAnnouncesItself(t *testing.T) {
 func TestOverlayHeaderNamesTheNavigationKeys(t *testing.T) {
 	withPicker := NewTextInputOverlayWithBranchPicker("Enter prompt", "", nil)
 	withPicker.SetSize(84, 3)
-	header := strings.SplitN(withPicker.Render(), "\n", 4)[2]
-	require.Contains(t, header, "tab")
-	require.Contains(t, header, "esc")
+	lines := strings.Split(withPicker.Render(), "\n")
+	footer := lines[len(lines)-2] // the frame's key row, above the bottom border
+	require.Contains(t, footer, "tab")
+	require.Contains(t, footer, "esc")
 
 	// Two stops need no explaining: tab reaches the button and that is all.
 	plain := NewTextInputOverlay("Enter prompt", "")

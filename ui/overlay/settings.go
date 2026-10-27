@@ -694,7 +694,7 @@ func (s *Settings) Render() string {
 			tabs = append(tabs, muted.Render(" "+name+" "))
 		}
 	}
-	b.WriteString(accent.Render("Settings  ") + strings.Join(tabs, subtle.Render("─┬─")))
+	b.WriteString(strings.Join(tabs, subtle.Render("─┬─")))
 	b.WriteString("\n\n")
 
 	// row draws one line. The selected one is drawn from its plain text, so the
@@ -797,8 +797,14 @@ func (s *Settings) Render() string {
 		b.WriteString("\n" + muted.Render(s.help()))
 	}
 
-	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(theme.Color(theme.Accent)).
-		Padding(1, 2).Render(fitBox(b.String(), inner, settingsBodyLines))
+	body := fitBox(b.String(), inner, settingsBodyLines)
+	// The last line of the body is the help line; the frame's footer is where
+	// it goes.
+	lines := strings.Split(body, "\n")
+	footer := strings.TrimSpace(lines[len(lines)-1])
+	body = strings.Join(lines[:len(lines)-1], "\n")
+	_ = accent
+	return Frame(width, "Settings", body, footer, theme.Color(theme.Accent))
 }
 
 // settingsBodyLines is the box's fixed height in lines of content: enough for

@@ -98,8 +98,7 @@ func (m *home) openRestorePicker() (tea.Model, tea.Cmd) {
 
 	picker := overlay.NewRestorePicker(entries)
 	if m.termWidth > 0 {
-		// Two columns of border and padding on each side, plus a little air.
-		picker.SetWidth(min(74, m.termWidth-4))
+		picker.SetWidth(min(74, max(m.layout.Overlay.W, m.termWidth-4)))
 	}
 	m.overlay = &restoreScreen{picker: picker}
 	return m, nil

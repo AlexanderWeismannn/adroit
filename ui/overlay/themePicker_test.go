@@ -1,8 +1,9 @@
 package overlay
 
 import (
-	"github.com/AlexanderWeismannn/adroit/theme"
 	"testing"
+
+	"github.com/AlexanderWeismannn/adroit/theme"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"

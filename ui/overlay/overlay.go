@@ -2,9 +2,10 @@ package overlay
 
 import (
 	"bytes"
-	"github.com/AlexanderWeismannn/adroit/theme"
 	"regexp"
 	"strings"
+
+	"github.com/AlexanderWeismannn/adroit/theme"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"

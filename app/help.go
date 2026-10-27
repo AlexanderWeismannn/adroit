@@ -16,6 +16,8 @@ import (
 )
 
 type helpText interface {
+	// title is the card's name, in the frame's border.
+	title() string
 	// toContent returns the help UI content.
 	toContent() string
 	// mask returns the bit mask for this help text. These are used to track which help screens
@@ -79,10 +81,13 @@ func helpRow(key, desc string) string {
 	return keyStyle.Render(key) + descStyle.Render(pad+"- "+desc)
 }
 
+func (h helpTypeGeneral) title() string          { return "Keys" }
+func (h helpTypeInstanceStart) title() string    { return "Session created" }
+func (h helpTypeInstanceAttach) title() string   { return "Attaching" }
+func (h helpTypeInstanceCheckout) title() string { return "Checkout" }
+
 func (h helpTypeInstanceStart) toContent() string {
 	content := lipgloss.JoinVertical(lipgloss.Left,
-		titleStyle.Render("Instance Created"),
-		"",
 		descStyle.Render("New session created:"),
 		descStyle.Render(fmt.Sprintf("• Git branch: %s (isolated worktree)",
 			lipgloss.NewStyle().Bold(true).Render(h.instance.Branch))),
@@ -104,8 +109,6 @@ func (h helpTypeInstanceStart) toContent() string {
 
 func (h helpTypeInstanceAttach) toContent() string {
 	content := lipgloss.JoinVertical(lipgloss.Left,
-		titleStyle.Render("Attaching to Instance"),
-		"",
 		descStyle.Render("To detach from a session, press ")+keyStyle.Render("ctrl-q"),
 	)
 	return content
@@ -113,8 +116,6 @@ func (h helpTypeInstanceAttach) toContent() string {
 
 func (h helpTypeInstanceCheckout) toContent() string {
 	content := lipgloss.JoinVertical(lipgloss.Left,
-		titleStyle.Render("Checkout Instance"),
-		"",
 		"Changes will be committed locally, and the branch name copied to your clipboard (where one is available) for you to check out.",
 		"",
 		"Feel free to make changes to the branch and commit them. When resuming, the session will continue from where you left off.",
@@ -170,6 +171,7 @@ func (m *home) showHelpScreen(helpType helpText, onDismiss func() tea.Cmd) (tea.
 		content := helpType.toContent()
 
 		text := overlay.NewTextOverlay(content)
+		text.Title = helpType.title()
 		text.OnDismiss = onDismiss
 		m.overlay = &helpScreen{text: text}
 		return m, nil

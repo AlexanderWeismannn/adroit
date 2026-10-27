@@ -2,9 +2,10 @@ package overlay
 
 import (
 	"fmt"
-	"github.com/AlexanderWeismannn/adroit/theme"
 	"strings"
 	"time"
+
+	"github.com/AlexanderWeismannn/adroit/theme"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -106,13 +107,11 @@ const maxRestoreRows = 8
 
 func (r *RestorePicker) Render() string {
 	var body strings.Builder
-	body.WriteString(restoreTitleStyle.Render("Restore a killed session"))
-	body.WriteString(restoreHintStyle.Render("   ↑↓ select · enter restore · esc cancel"))
-	body.WriteString("\n\n")
+	footer := Keys(Key{"↑↓", "select"}, Key{"enter", "restore"}, Key{"esc", "cancel"})
 
 	if len(r.entries) == 0 {
-		body.WriteString(restoreHintStyle.Render("  Nothing to restore — no session has been killed yet."))
-		return restoreBorderStyle.Render(body.String())
+		body.WriteString(restoreHintStyle.Render("Nothing to restore — no session has been killed yet."))
+		return Frame(r.width, "Restore a killed session", body.String(), footer, theme.Color(theme.Accent))
 	}
 
 	start := 0
@@ -170,7 +169,7 @@ func (r *RestorePicker) Render() string {
 			fmt.Sprintf("  %d more below", len(r.entries)-end)))
 	}
 
-	return restoreBorderStyle.Width(r.width).Render(body.String())
+	return Frame(r.width, "Restore a killed session", body.String(), footer, theme.Color(theme.Accent))
 }
 
 // describe is the right-hand metadata of a row: how long ago it was killed, and

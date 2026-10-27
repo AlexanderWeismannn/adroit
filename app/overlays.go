@@ -61,7 +61,8 @@ func (m *home) promptInput() *overlay.TextInputOverlay {
 }
 
 func (s *promptScreen) resize(m *home, width, height int) {
-	s.input.SetSize(int(float32(width)*0.6), int(float32(height)*0.4))
+	r := ui.Layout(width, height, ui.Split)
+	s.input.SetSize(r.Overlay.W, r.Overlay.H)
 	s.input.SetMaxHeight(height)
 }
 
@@ -230,7 +231,7 @@ type helpScreen struct {
 }
 
 func (s *helpScreen) resize(m *home, width, height int) {
-	s.text.SetWidth(int(float32(width) * 0.6))
+	s.text.SetWidth(ui.Layout(width, height, ui.Split).Overlay.W)
 }
 
 func (s *helpScreen) render(m *home) string { return s.text.Render() }
@@ -275,7 +276,9 @@ type confirmScreen struct {
 	confirmed bool
 }
 
-func (s *confirmScreen) resize(m *home, width, height int) {}
+func (s *confirmScreen) resize(m *home, width, height int) {
+	s.dialog.SetWidth(ui.Layout(width, height, ui.Split).Dialog.W)
+}
 
 func (s *confirmScreen) render(m *home) string { return s.dialog.Render() }
 
@@ -294,11 +297,14 @@ func (s *confirmScreen) handleKey(m *home, msg tea.KeyMsg) tea.Cmd {
 	return nil
 }
 
-// confirmAction shows a confirmation modal and stores the action to execute on confirm
-func (m *home) confirmAction(message string, action tea.Cmd) tea.Cmd {
+// confirmAction shows a yes/no dialog -- title in the border, message as the
+// body saying what is lost and what can be recovered, verb as the word beside
+// y -- and stores the action to run on confirm.
+func (m *home) confirmAction(title, message, verb string, action tea.Cmd) tea.Cmd {
 	s := &confirmScreen{dialog: overlay.NewConfirmationOverlay(message), action: action}
-	// Set a fixed width for consistent appearance
-	s.dialog.SetWidth(50)
+	s.dialog.Title = title
+	s.dialog.ConfirmLabel = verb
+	s.dialog.SetWidth(m.layout.Dialog.W)
 	s.dialog.OnConfirm = func() { s.confirmed = true }
 	s.dialog.OnCancel = func() { s.confirmed = false }
 	m.overlay = s
