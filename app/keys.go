@@ -3,7 +3,6 @@ package app
 import (
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/AlexanderWeismannn/adroit/keys"
@@ -28,8 +27,7 @@ func (m *home) handleMenuHighlighting(msg tea.KeyMsg) (cmd tea.Cmd, returnEarly 
 	// The overlays own every key while they are open; highlighting a menu entry
 	// underneath one, and re-sending the key to do it, is both invisible and a
 	// second delivery of a keypress the overlay already handled.
-	if m.state == statePrompt || m.state == stateHelp || m.state == stateConfirm ||
-		m.state == stateTheme || m.state == stateRestore || m.state == stateSettings {
+	if m.overlay != nil {
 		return nil, false
 	}
 	// While a name is being typed the row owns every printable key. Most letters
@@ -38,7 +36,7 @@ func (m *home) handleMenuHighlighting(msg tea.KeyMsg) (cmd tea.Cmd, returnEarly 
 	// keystroke and re-sent each one through the update loop to get it delivered.
 	// Enter, tab and escape still highlight: they are the ones the menu is
 	// advertising while the row is being named.
-	if m.state == stateNew {
+	if m.naming {
 		switch msg.Type {
 		case tea.KeyRunes, tea.KeySpace, tea.KeyBackspace:
 			return nil, false
@@ -58,8 +56,8 @@ func (m *home) handleMenuHighlighting(msg tea.KeyMsg) (cmd tea.Cmd, returnEarly 
 	}
 
 	// Skip the menu highlighting if the key is not in the map or we are using the shift up and down keys.
-	// TODO: cleanup: when you press enter on stateNew, we use keys.KeySubmitName. We should unify the keymap.
-	if name == keys.KeyEnter && m.state == stateNew {
+	// TODO: cleanup: when you press enter while naming, we use keys.KeySubmitName. We should unify the keymap.
+	if name == keys.KeyEnter && m.naming {
 		name = keys.KeySubmitName
 	}
 	m.keySent = true
@@ -74,31 +72,20 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 		return m, cmd
 	}
 
-	if m.state == stateHelp {
-		return m.handleHelpState(msg)
+	// An open screen owns every key.
+	if m.overlay != nil {
+		return m, m.overlay.handleKey(m, msg)
 	}
 
-	if m.state == stateTheme {
-		return m.handleThemeState(msg)
-	}
-
-	if m.state == stateSettings {
-		return m.handleSettingsState(msg)
-	}
-
-	if m.state == stateRestore {
-		return m.handleRestoreState(msg)
-	}
-
-	if m.state == stateNew {
+	if m.naming {
 		// The preview follows every keystroke, and is cleared by every way out.
 		defer func() {
-			m.syncNaming(m.state == stateNew)
+			m.syncNaming(m.naming)
 		}()
 
 		// Handle quit commands first. Don't handle q because the user might want to type that.
 		if msg.String() == "ctrl+c" {
-			m.state = stateDefault
+			m.naming = false
 			m.promptAfterName = false
 			m.list.Kill()
 			return m, tea.Sequence(
@@ -124,11 +111,12 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 			// If promptAfterName, show prompt+branch overlay before starting
 			if m.promptAfterName {
 				m.promptAfterName = false
-				m.state = statePrompt
+				m.naming = false
 				m.menu.SetState(ui.StatePrompt)
-				m.textInputOverlay = m.newPromptOverlay()
+				input := m.newPromptOverlay()
+				m.overlay = &promptScreen{input: input}
 				// Trigger initial branch search (no debounce, version 0)
-				initialSearch := m.runBranchSearch("", m.textInputOverlay.BranchFilterVersion())
+				initialSearch := m.runBranchSearch("", input.BranchFilterVersion())
 				return m, tea.Batch(tea.WindowSize(), initialSearch)
 			}
 
@@ -136,7 +124,7 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 			instance.SetStatus(session.Loading)
 			m.newInstanceFinalizer()
 			m.promptAfterName = false
-			m.state = stateDefault
+			m.naming = false
 			m.menu.SetState(ui.StateDefault)
 
 			// Return a tea.Cmd that runs instance.Start in the background
@@ -186,10 +174,11 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 			// first is pure friction. It is filled in from the branch on submit.
 			m.promptAfterName = false
 			m.branchFromNaming = true
-			m.state = statePrompt
+			m.naming = false
 			m.menu.SetState(ui.StatePrompt)
-			m.textInputOverlay = m.newBranchOverlay()
-			version := m.textInputOverlay.BranchFilterVersion()
+			input := m.newBranchOverlay()
+			m.overlay = &promptScreen{input: input}
+			version := input.BranchFilterVersion()
 			initialSearch := m.runBranchSearch("", version)
 			// Fetch as N does, then search again: this path listed only the
 			// branches already known locally, so a branch pushed since the last
@@ -204,7 +193,7 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 			return m, tea.Batch(tea.WindowSize(), initialSearch, refreshed)
 		case tea.KeyEsc:
 			m.list.Kill()
-			m.state = stateDefault
+			m.naming = false
 			m.instanceChanged()
 
 			return m, tea.Sequence(
@@ -215,156 +204,6 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 				},
 			)
 		default:
-		}
-		return m, nil
-	} else if m.state == statePrompt {
-		// Handle cancel via ctrl+c before delegating to the overlay
-		if msg.String() == "ctrl+c" {
-			return m, m.cancelPromptOverlay()
-		}
-
-		// Use the new TextInputOverlay component to handle all key events
-		shouldClose, branchFilterChanged := m.textInputOverlay.HandleKeyPress(msg)
-
-		// Check if the form was submitted or canceled
-		if shouldClose {
-			selected := m.list.GetSelectedInstance()
-			if selected == nil {
-				return m, nil
-			}
-
-			if m.textInputOverlay.IsCanceled() {
-				// Reached by tab from the name prompt, esc steps back to it with
-				// the name kept. It used to throw the whole new session away.
-				if m.branchFromNaming && !selected.Started() {
-					m.branchFromNaming = false
-					m.textInputOverlay = nil
-					m.state = stateNew
-					m.menu.SetState(ui.StateNewInstance)
-					m.syncNaming(true)
-					return m, tea.WindowSize()
-				}
-				return m, m.cancelPromptOverlay()
-			}
-			m.branchFromNaming = false
-
-			if m.textInputOverlay.IsSubmitted() {
-				prompt := m.textInputOverlay.GetValue()
-				selectedBranch := m.textInputOverlay.GetSelectedBranch()
-				selectedProgram := m.textInputOverlay.GetSelectedProgram()
-				noWorktree := m.textInputOverlay.IsNoWorktreeSelected()
-
-				// A session reached by tabbing straight to the branch picker has no
-				// name yet, and what it is opening is the name anyone would have
-				// typed.
-				if !selected.Started() && selected.Title == "" {
-					var title string
-					var err error
-					if noWorktree {
-						title = titleForRepo(selected.Path, m.list.GetInstances())
-					} else {
-						title, err = titleForBranch(selectedBranch, m.list.GetInstances())
-					}
-					if err == nil {
-						err = selected.SetTitle(title)
-					}
-					if err != nil {
-						// The message goes in the overlay, not the error box. The
-						// overlay covers most of the screen and fades the rest, so an
-						// error behind it reads as nothing having happened.
-						m.textInputOverlay.Submitted = false
-						m.textInputOverlay.SetError(err.Error())
-						m.textInputOverlay.FocusBranchPicker()
-						return m, nil
-					}
-				}
-
-				if !selected.Started() {
-					// Shift+N flow: instance not started yet — set branch, start, then send prompt
-					if selectedBranch != "" {
-						selected.SetSelectedBranch(selectedBranch)
-					}
-					selected.SetNoWorktree(noWorktree)
-					if selectedProgram != "" {
-						selected.Program = selectedProgram
-					}
-					selected.Prompt = prompt
-
-					// Finalize into list and start
-					selected.SetStatus(session.Loading)
-					m.newInstanceFinalizer()
-					m.textInputOverlay = nil
-					m.state = stateDefault
-					m.menu.SetState(ui.StateDefault)
-
-					startCmd := func() tea.Msg {
-						err := selected.Start(true)
-						return instanceStartedMsg{
-							instance:        selected,
-							err:             err,
-							promptAfterName: false,
-							selectedBranch:  selectedBranch,
-						}
-					}
-
-					return m, tea.Batch(tea.WindowSize(), m.instanceChanged(), startCmd)
-				}
-
-				// Instance already running (the `i` key): send the prompt and go
-				// straight back to the list. Off the loop, since sending pauses
-				// between the text and the enter.
-				m.textInputOverlay = nil
-				m.state = stateDefault
-				m.menu.SetState(ui.StateDefault)
-				if strings.TrimSpace(prompt) == "" {
-					return m, tea.WindowSize()
-				}
-				title := selected.Title
-				return m, tea.Batch(tea.WindowSize(), func() tea.Msg {
-					if err := selected.SendPrompt(prompt); err != nil {
-						return err
-					}
-					return noticeMsg(fmt.Sprintf("sent to %s", title))
-				})
-			}
-
-			// Close the overlay and reset state
-			m.textInputOverlay = nil
-			m.state = stateDefault
-			return m, tea.Sequence(
-				tea.WindowSize(),
-				func() tea.Msg {
-					m.menu.SetState(ui.StateDefault)
-					m.showHelpScreen(helpStart(selected), nil)
-					return nil
-				},
-			)
-		}
-
-		// Schedule a debounced branch search if the filter changed
-		if branchFilterChanged {
-			filter := m.textInputOverlay.BranchFilter()
-			version := m.textInputOverlay.BranchFilterVersion()
-			return m, m.scheduleBranchSearch(filter, version)
-		}
-
-		return m, nil
-	}
-
-	// Handle confirmation state
-	if m.state == stateConfirm {
-		shouldClose := m.confirmationOverlay.HandleKeyPress(msg)
-		if shouldClose {
-			m.state = stateDefault
-			m.confirmationOverlay = nil
-			// Run whatever was confirmed, off the loop. Whatever it returns -- an
-			// error to show, or a step that does touch the model -- comes back
-			// through Update like any other message.
-			if action := m.pendingAction; action != nil {
-				m.pendingAction = nil
-				return m, action
-			}
-			return m, nil
 		}
 		return m, nil
 	}
@@ -426,9 +265,8 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 			selected.Status == session.Loading {
 			return m, nil
 		}
-		m.state = statePrompt
 		m.menu.SetState(ui.StatePrompt)
-		m.textInputOverlay = overlay.NewTextInputOverlay(fmt.Sprintf("Send to %s", selected.Title), "")
+		m.overlay = &promptScreen{input: overlay.NewTextInputOverlay(fmt.Sprintf("Send to %s", selected.Title), "")}
 		return m, tea.WindowSize()
 	case keys.KeyHelp:
 		return m.showHelpScreen(helpTypeGeneral{}, nil)
@@ -456,7 +294,7 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 
 		m.newInstanceFinalizer = m.list.AddInstance(instance)
 		m.list.SetSelectedInstance(m.list.NumInstances() - 1)
-		m.state = stateNew
+		m.naming = true
 		m.menu.SetState(ui.StateNewInstance)
 		m.promptAfterName = true
 
@@ -477,7 +315,7 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 
 		m.newInstanceFinalizer = m.list.AddInstance(instance)
 		m.list.SetSelectedInstance(m.list.NumInstances() - 1)
-		m.state = stateNew
+		m.naming = true
 		m.menu.SetState(ui.StateNewInstance)
 		m.syncNaming(true)
 
@@ -612,9 +450,7 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 	case keys.KeySettings:
 		return m.openSettings()
 	case keys.KeyTheme:
-		m.themeBeforePicker = theme.Current()
-		m.themePicker = overlay.NewThemePicker(m.appConfig.Theme)
-		m.state = stateTheme
+		m.overlay = &themeScreen{picker: overlay.NewThemePicker(m.appConfig.Theme), before: theme.Current()}
 		return m, nil
 	case keys.KeyOpenPR:
 		selected := m.list.GetSelectedInstance()

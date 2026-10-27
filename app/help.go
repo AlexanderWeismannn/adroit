@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+
 	"github.com/AlexanderWeismannn/adroit/log"
 	"github.com/AlexanderWeismannn/adroit/session"
 	"github.com/AlexanderWeismannn/adroit/theme"
@@ -183,9 +184,9 @@ func (m *home) showHelpScreen(helpType helpText, onDismiss func() tea.Cmd) (tea.
 
 		content := helpType.toContent()
 
-		m.textOverlay = overlay.NewTextOverlay(content)
-		m.textOverlay.OnDismiss = onDismiss
-		m.state = stateHelp
+		text := overlay.NewTextOverlay(content)
+		text.OnDismiss = onDismiss
+		m.overlay = &helpScreen{text: text}
 		return m, nil
 	}
 
@@ -193,34 +194,6 @@ func (m *home) showHelpScreen(helpType helpText, onDismiss func() tea.Cmd) (tea.
 	if onDismiss != nil {
 		return m, onDismiss()
 	}
-	return m, nil
-}
-
-// handleHelpState handles key events when in help state
-func (m *home) handleHelpState(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// Any key press will close the help overlay
-	shouldClose, dismissed := m.textOverlay.HandleKeyPress(msg)
-	if shouldClose {
-		m.state = stateDefault
-		// Set outright rather than from inside a Cmd. We are already in Update
-		// with the model in hand, and the ordering the Cmd bought -- menu reset
-		// after re-measure -- never meant anything for a state flag.
-		m.menu.SetState(ui.StateDefault)
-
-		// What the help screen was gating goes back on its own rather than inside
-		// a tea.Sequence. It can be an attach, which reaches bubbletea as an
-		// exec: a Sequence runs on its own goroutine and hands each result to
-		// the event loop one at a time, which is not a useful thing to put an
-		// exec in the middle of. Nothing is lost by dropping the re-measure on
-		// this path -- an attach re-measures when it finishes, and the other
-		// callback ends in instanceChanged.
-		if dismissed != nil {
-			return m, dismissed
-		}
-
-		return m, tea.WindowSize()
-	}
-
 	return m, nil
 }
 

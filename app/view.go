@@ -3,7 +3,6 @@ package app
 import (
 	"strings"
 
-	"github.com/AlexanderWeismannn/adroit/log"
 	"github.com/AlexanderWeismannn/adroit/ui/overlay"
 
 	"github.com/charmbracelet/lipgloss"
@@ -29,36 +28,8 @@ func (m *home) View() string {
 	// Overlays are fitted too, and after being placed: an overlay is sized off
 	// the terminal, but the confirmation is a fixed 50 columns and a narrow
 	// terminal is exactly where it does not fit.
-	if m.state == statePrompt {
-		if m.textInputOverlay == nil {
-			log.ErrorLog.Printf("text input overlay is nil")
-		}
-		return m.fitToTerminal(overlay.PlaceOverlay(0, 0, m.textInputOverlay.Render(), mainView, true, true))
-	} else if m.state == stateHelp {
-		if m.textOverlay == nil {
-			log.ErrorLog.Printf("text overlay is nil")
-		}
-		return m.fitToTerminal(overlay.PlaceOverlay(0, 0, m.textOverlay.Render(), mainView, true, true))
-	} else if m.state == stateSettings && m.settings != nil {
-		m.settings.SetWidth(m.termWidth)
-		return m.fitToTerminal(overlay.PlaceOverlay(0, 0, m.settings.Render(), mainView, true, true))
-	} else if m.state == stateTheme {
-		if m.themePicker == nil {
-			log.ErrorLog.Printf("theme picker is nil")
-			return mainView
-		}
-		return m.fitToTerminal(overlay.PlaceOverlay(0, 0, m.themePicker.Render(), mainView, true, true))
-	} else if m.state == stateRestore {
-		if m.restorePicker == nil {
-			log.ErrorLog.Printf("restore picker is nil")
-			return mainView
-		}
-		return m.fitToTerminal(overlay.PlaceOverlay(0, 0, m.restorePicker.Render(), mainView, true, true))
-	} else if m.state == stateConfirm {
-		if m.confirmationOverlay == nil {
-			log.ErrorLog.Printf("confirmation overlay is nil")
-		}
-		return m.fitToTerminal(overlay.PlaceOverlay(0, 0, m.confirmationOverlay.Render(), mainView, true, true))
+	if m.overlay != nil {
+		return m.fitToTerminal(overlay.PlaceOverlay(0, 0, m.overlay.render(m), mainView, true, true))
 	}
 
 	return mainView

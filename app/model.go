@@ -15,7 +15,6 @@ import (
 	"github.com/AlexanderWeismannn/adroit/session"
 	"github.com/AlexanderWeismannn/adroit/session/dev"
 	"github.com/AlexanderWeismannn/adroit/session/git"
-	"github.com/AlexanderWeismannn/adroit/theme"
 	"github.com/AlexanderWeismannn/adroit/ui"
 	"github.com/AlexanderWeismannn/adroit/ui/overlay"
 
@@ -78,26 +77,6 @@ func handleTermination(p *tea.Program, terminating chan struct{}) (stop func()) 
 	}
 }
 
-type state int
-
-const (
-	stateDefault state = iota
-	// stateNew is the state when the user is creating a new instance.
-	stateNew
-	// statePrompt is the state when the user is entering a prompt.
-	statePrompt
-	// stateHelp is the state when a help screen is displayed.
-	stateHelp
-	// stateConfirm is the state when a confirmation modal is displayed.
-	stateConfirm
-	// stateTheme is the state when the colour theme picker is open.
-	stateTheme
-	// stateRestore is the state when the killed-session picker is open.
-	stateRestore
-	// stateSettings is the state when the settings screen is open.
-	stateSettings
-)
-
 type home struct {
 	// busy holds the sessions a resume or checkout is working on off the update
 	// loop, so a second press of the same key -- or a kill -- cannot start on a
@@ -134,9 +113,13 @@ type home struct {
 
 	// -- State --
 
-	// state is the current discrete state of the application
-	state state
-	// newInstanceFinalizer is called when the state is stateNew and then you press enter.
+	// overlay is the screen drawn over the main view, which owns the keyboard
+	// while it is open; nil when none is. See overlayScreen.
+	overlay overlayScreen
+	// naming is true while a new session's name is being typed into its row.
+	// Not an overlay: the row itself is the input.
+	naming bool
+	// newInstanceFinalizer is called when a session is being named and you press enter.
 	// It registers the new instance in the list after the instance has been started.
 	newInstanceFinalizer func()
 
@@ -177,37 +160,11 @@ type home struct {
 	// paneChanged is when it last did, which sets the sampling pace.
 	paneHash    uint64
 	paneChanged time.Time
-	// textInputOverlay handles text input with state
-	textInputOverlay *overlay.TextInputOverlay
-	// textOverlay displays text information
-	textOverlay *overlay.TextOverlay
-	// confirmationOverlay displays confirmation modals
-	confirmationOverlay *overlay.ConfirmationOverlay
-	// pendingAction holds a confirmed action until the update loop can hand it to
-	// Bubble Tea as a Cmd. The overlay's OnConfirm callback is invoked from inside
-	// a key handler, so an action run there runs ON the update loop, for as long
-	// as it takes -- and a kill tears down a tmux session, a git worktree and the
-	// dev stack, none of which is bounded. Parking it here costs one frame and
-	// keeps the interface answering while it happens.
-	pendingAction tea.Cmd
-
 	// devStack owns the singleton development stack. Nil is impossible; an
 	// unconfigured stack is a live object that reports itself unconfigured, so
 	// every call site can ask rather than nil-check.
 	devStack *dev.Stack
 
-	// themePicker is open only in stateTheme. themeBeforePicker is the palette
-	// that was in use when it opened, kept here rather than in the picker so
-	// cancelling restores it from the one place that installed it.
-	themePicker       *overlay.ThemePicker
-	themeBeforePicker theme.Palette
-
-	// restorePicker is open only in stateRestore: the list of sessions that have
-	// been killed and whose conversation can be picked back up.
-	restorePicker *overlay.RestorePicker
-
-	// settings is open only in stateSettings.
-	settings *overlay.Settings
 	// programOverridden is true when -p chose the program, which then wins over
 	// a repository's own agent.
 	programOverridden bool
@@ -245,7 +202,6 @@ func newHome(ctx context.Context, program string, autoYes bool) *home {
 		program:           program,
 		programOverridden: program != appConfig.GetProgram(),
 		autoYes:           autoYes,
-		state:             stateDefault,
 		appState:          appState,
 		devStack:          devStack,
 		terminating:       make(chan struct{}),
@@ -328,12 +284,8 @@ func (m *home) updateHandleWindowSizeEvent(msg tea.WindowSizeMsg) {
 	m.tabbedWindow.SetSize(tabsWidth, contentHeight)
 	m.list.SetSize(listWidth, contentHeight)
 
-	if m.textInputOverlay != nil {
-		m.textInputOverlay.SetSize(int(float32(msg.Width)*0.6), int(float32(msg.Height)*0.4))
-		m.textInputOverlay.SetMaxHeight(msg.Height)
-	}
-	if m.textOverlay != nil {
-		m.textOverlay.SetWidth(int(float32(msg.Width) * 0.6))
+	if m.overlay != nil {
+		m.overlay.resize(m, msg.Width, msg.Height)
 	}
 
 	previewWidth, previewHeight := m.tabbedWindow.GetPreviewSize()
@@ -373,7 +325,7 @@ func (m *home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Back from a session. Both panes and the session itself may be the wrong
 		// shape now: it was resized to the real terminal while attached, and the
 		// terminal may have been resized while we were not watching.
-		m.state = stateDefault
+		m.overlay = nil
 		if msg.err != nil {
 			return m, tea.Batch(tea.WindowSize(), m.handleError(msg.err))
 		}
@@ -406,9 +358,8 @@ func (m *home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if m.promptAfterName {
-			m.state = statePrompt
 			m.menu.SetState(ui.StatePrompt)
-			m.textInputOverlay = overlay.NewTextInputOverlay("Enter prompt", "")
+			m.overlay = &promptScreen{input: overlay.NewTextInputOverlay("Enter prompt", "")}
 			m.promptAfterName = false
 		} else {
 			m.showHelpScreen(helpStart(inst), nil)
@@ -557,16 +508,17 @@ func (m *home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case branchSearchDebounceMsg:
 		// Debounce timer fired — check if this is still the current filter version
-		if m.textInputOverlay == nil {
+		input := m.promptInput()
+		if input == nil {
 			return m, nil
 		}
-		if msg.version != m.textInputOverlay.BranchFilterVersion() {
+		if msg.version != input.BranchFilterVersion() {
 			return m, nil // stale, a newer debounce is pending
 		}
 		return m, m.runBranchSearch(msg.filter, msg.version)
 	case branchSearchResultMsg:
-		if m.textInputOverlay != nil {
-			m.textInputOverlay.SetBranchResults(msg.branches, msg.version)
+		if input := m.promptInput(); input != nil {
+			input.SetBranchResults(msg.branches, msg.version)
 		}
 		return m, nil
 	case tea.KeyMsg:
@@ -622,8 +574,8 @@ func (m *home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(tea.WindowSize(), m.instanceChanged(), notice)
 	case overlay.SettingsCheckMsg:
-		if m.settings != nil {
-			m.settings.HandleCheck(msg)
+		if s, ok := m.overlay.(*settingsScreen); ok {
+			s.settings.HandleCheck(msg)
 		}
 		return m, nil
 	case instancePausedMsg:
@@ -666,9 +618,8 @@ func (m *home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if msg.promptAfterName {
-			m.state = statePrompt
 			m.menu.SetState(ui.StatePrompt)
-			m.textInputOverlay = m.newPromptOverlay()
+			m.overlay = &promptScreen{input: m.newPromptOverlay()}
 		} else {
 			// If instance has a prompt (set from Shift+N flow), send it now
 			if msg.instance.Prompt != "" {

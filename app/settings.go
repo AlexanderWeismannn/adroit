@@ -10,7 +10,6 @@ import (
 	"github.com/AlexanderWeismannn/adroit/config"
 	"github.com/AlexanderWeismannn/adroit/secrets"
 	"github.com/AlexanderWeismannn/adroit/session/git"
-	"github.com/AlexanderWeismannn/adroit/ui"
 	"github.com/AlexanderWeismannn/adroit/ui/overlay"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -26,9 +25,9 @@ func (m *home) openSettings() (tea.Model, tea.Cmd) {
 			repo = root
 		}
 	}
-	m.settings = overlay.NewSettings(m.appConfig, secrets.Default(), repo, m.saveSettings)
-	m.settings.SetWidth(m.termWidth)
-	m.state = stateSettings
+	settings := overlay.NewSettings(m.appConfig, secrets.Default(), repo, m.saveSettings)
+	settings.SetWidth(m.termWidth)
+	m.overlay = &settingsScreen{settings: settings}
 	return m, nil
 }
 
@@ -43,24 +42,6 @@ func (m *home) saveSettings(changes map[string]any) error {
 		m.program = m.appConfig.GetProgram()
 	}
 	return nil
-}
-
-func (m *home) handleSettingsState(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if msg.String() == "ctrl+c" {
-		m.closeSettings()
-		return m, nil
-	}
-	cmd, closed := m.settings.HandleKeyPress(msg, checkAgentKey)
-	if closed {
-		m.closeSettings()
-	}
-	return m, cmd
-}
-
-func (m *home) closeSettings() {
-	m.settings = nil
-	m.state = stateDefault
-	m.menu.SetState(ui.StateDefault)
 }
 
 // checkAgentKey runs the agent once, through agent-run so it gets exactly the
