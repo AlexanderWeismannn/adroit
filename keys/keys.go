@@ -54,6 +54,21 @@ const (
 	// Reorder keybindings
 	KeyMoveUp
 	KeyMoveDown
+
+	// KeyLeft and KeyRight switch tabs.
+	KeyLeft
+	KeyRight
+
+	// Captions for the bar while the window owns the keyboard: what the arrow
+	// keys do there, and the way back to the list.
+	KeyPaneScroll
+	KeyPanePage
+	KeyPaneFollow
+	KeyPaneTabs
+	KeyPaneAttach
+	KeyPaneList
+	KeyPaneHelp
+	KeyPaneQuit
 )
 
 // Group is where a binding is drawn in the menu.
@@ -78,6 +93,8 @@ const (
 	GroupPrompt
 	// GroupOverlay is both of the above: the key that backs out of either.
 	GroupOverlay
+	// GroupPane is the bar while the window owns the keyboard.
+	GroupPane
 )
 
 // Ctx is what a binding's predicates see: the facts the menu knows, never the
@@ -149,6 +166,8 @@ var Table = []Binding{
 	{Name: KeyMoveDown, Keys: []string{"J"}, Key: "J", Label: "move down"},
 	{Name: KeyPageUp, Keys: []string{"pgup"}, Key: "pgup", Label: "page up"},
 	{Name: KeyPageDown, Keys: []string{"pgdown"}, Key: "pgdn", Label: "page down"},
+	{Name: KeyLeft, Keys: []string{"left", "h"}, Key: "←/h", Label: "previous tab"},
+	{Name: KeyRight, Keys: []string{"right", "l"}, Key: "→/l", Label: "next tab"},
 
 	// -- the session --
 
@@ -226,7 +245,7 @@ var Table = []Binding{
 	// -- the interface --
 
 	{Name: KeyTab, Keys: []string{"tab"}, Key: "tab", Label: "pane", Group: GroupApp,
-		Help: "Switch between preview, diff, terminal and run tabs",
+		Help: "Give the keyboard to the window, and back to the list",
 		When: selected},
 	{Name: KeyNew, Keys: []string{"n"}, Key: "n", Label: "new", Group: GroupApp,
 		Help: "Create a new session"},
@@ -255,6 +274,16 @@ var Table = []Binding{
 	{Name: KeyNextField, Key: "tab", Label: "next field", Group: GroupPrompt},
 	{Name: KeyConfirm, Key: "ctrl+s", Label: "submit", Group: GroupPrompt},
 	{Name: KeyCancel, Key: "esc", Label: "cancel", Group: GroupOverlay},
+
+	// The bar while the window owns the keyboard.
+	{Name: KeyPaneScroll, Key: "↑↓", Label: "scroll", Group: GroupPane},
+	{Name: KeyPanePage, Key: "pgup/dn", Label: "page", Group: GroupPane},
+	{Name: KeyPaneFollow, Key: "esc", Label: "follow", Group: GroupPane},
+	{Name: KeyPaneTabs, Key: "←→", Label: "tab", Group: GroupPane},
+	{Name: KeyPaneAttach, Key: "↵", Label: "attach", Group: GroupPane},
+	{Name: KeyPaneList, Key: "tab", Label: "list", Group: GroupPane},
+	{Name: KeyPaneHelp, Key: "?", Label: "help", Group: GroupPane},
+	{Name: KeyPaneQuit, Key: "q", Label: "quit", Group: GroupPane},
 }
 
 // Lookup is the table by name.
@@ -338,6 +367,18 @@ func OverlayMenu(g Group) []KeyName {
 	return out
 }
 
+// PaneMenu is the bar while the window owns the keyboard: the arrows' meaning
+// there, then the tabs and attach, then the way back and out.
+func PaneMenu() []KeyName {
+	var out []KeyName
+	for _, b := range Table {
+		if b.Group == GroupPane {
+			out = append(out, b.Name)
+		}
+	}
+	return out
+}
+
 // A HelpLine is one row of the help card: a key from the table, named by Name,
 // or a literal pair for the keys the card groups into one row (↑/k and ↓/j) and
 // the ones no binding owns (1-9, ctrl-q to detach).
@@ -396,6 +437,7 @@ var HelpSections = []HelpSection{
 		{Name: KeySettings},
 		{Name: KeyTheme},
 		{Name: KeyTab},
+		{Key: "←/h, →/l", Desc: "Switch between preview, diff, terminal and run tabs"},
 		{Key: "shift-↓/↑", Desc: "Scroll in preview/diff/terminal/run view"},
 		{Key: "pgup/pgdn", Desc: "Scroll a page at a time; esc returns to the live view"},
 		{Name: KeyQuit},

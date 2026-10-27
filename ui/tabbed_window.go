@@ -38,6 +38,8 @@ func applyTabTheme() {
 	windowStyle = lipgloss.NewStyle().
 		BorderForeground(highlightColor).
 		Border(lipgloss.RoundedBorder(), false, true, false, true)
+	unfocusedRuleStyle = lipgloss.NewStyle().Foreground(theme.Color(theme.Muted))
+	unfocusedWindowStyle = windowStyle.BorderForeground(theme.Color(theme.Muted))
 	footerLiveStyle = lipgloss.NewStyle().Foreground(theme.Color(theme.Success))
 	footerPausedStyle = lipgloss.NewStyle().Foreground(theme.Color(theme.Warning))
 }
@@ -46,6 +48,25 @@ func applyTabTheme() {
 // the list colours the same states: green is the live view, amber is a thing
 // waiting on you.
 var footerLiveStyle, footerPausedStyle lipgloss.Style
+
+// unfocusedRuleStyle and unfocusedWindowStyle draw the border while the list
+// owns the keyboard.
+var unfocusedRuleStyle, unfocusedWindowStyle lipgloss.Style
+
+// rule is the border style for the current focus.
+func (w *TabbedWindow) rule() lipgloss.Style {
+	if w.focused {
+		return tabRuleStyle
+	}
+	return unfocusedRuleStyle
+}
+
+func (w *TabbedWindow) box() lipgloss.Style {
+	if w.focused {
+		return windowStyle
+	}
+	return unfocusedWindowStyle
+}
 
 // footerHeight is the rows the status footer takes: one, the bottom border.
 const footerHeight = 1
@@ -87,6 +108,8 @@ type TabbedWindow struct {
 	// paneRate is how often the live pane is sampled, per second, for the
 	// footer.
 	paneRate float64
+	// focused is whether the window owns the keyboard.
+	focused bool
 }
 
 // SetDevStack records which session the development stack is running for, and
@@ -184,6 +207,17 @@ func (w *TabbedWindow) GetPreviewSize() (width, height int) {
 
 func (w *TabbedWindow) Toggle() {
 	w.activeTab = (w.activeTab + 1) % len(w.tabs)
+}
+
+// Prev selects the tab to the left, wrapping round.
+func (w *TabbedWindow) Prev() {
+	w.activeTab = (w.activeTab + len(w.tabs) - 1) % len(w.tabs)
+}
+
+// SetFocused records whether the window owns the keyboard, which its border
+// shows: the accent when it does, the muted rule when the list does.
+func (w *TabbedWindow) SetFocused(focused bool) {
+	w.focused = focused
 }
 
 // UpdatePreview updates the content of the preview pane. instance may be nil.
@@ -414,7 +448,7 @@ func (w *TabbedWindow) tabBar(width int) string {
 	render := func(nameWidth int) (string, int) {
 		var b strings.Builder
 		used := 0
-		b.WriteString(tabRuleStyle.Render("╭─"))
+		b.WriteString(w.rule().Render("╭─"))
 		used += 2
 		for i, name := range w.tabs {
 			if i > 0 {
@@ -447,7 +481,7 @@ func (w *TabbedWindow) tabBar(width int) string {
 	if fill < 0 {
 		return clip(bar, width)
 	}
-	return bar + tabRuleStyle.Render(strings.Repeat("─", fill)+"╮")
+	return bar + w.rule().Render(strings.Repeat("─", fill)+"╮")
 }
 
 // diffSummary is the diff's size, as the footer says it: "+25k −2.4k".
@@ -551,9 +585,9 @@ func (w *TabbedWindow) footer(width int) string {
 		label, fill = "", width-3
 	}
 	if fill < 0 {
-		return clip(tabRuleStyle.Render("╰╯"), width)
+		return clip(w.rule().Render("╰╯"), width)
 	}
-	return tabRuleStyle.Render("╰─") + label + tabRuleStyle.Render(strings.Repeat("─", fill)+"╯")
+	return w.rule().Render("╰─") + label + w.rule().Render(strings.Repeat("─", fill)+"╯")
 }
 
 // compactCount shortens a line count for a badge: 980, 2.4k, 25k.
@@ -585,7 +619,7 @@ func (w *TabbedWindow) String() string {
 	case RunTab:
 		content = w.run.String()
 	}
-	window := windowStyle.Render(
+	window := w.box().Render(
 		lipgloss.Place(
 			w.width, w.height-windowStyle.GetVerticalFrameSize()-tabBarHeight-footerHeight,
 			lipgloss.Left, lipgloss.Top, content))

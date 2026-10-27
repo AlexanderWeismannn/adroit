@@ -45,13 +45,13 @@ func TestLayoutFillsTheTerminalExactly(t *testing.T) {
 	}
 }
 
-// The split geometry: a header row, the list at three tenths of the width, and
-// the last two rows for the bar and the notice.
+// The split geometry: a header row, a 36-column list, and the last two rows
+// for the bar and the notice.
 func TestSplitKeepsTheEstablishedGeometry(t *testing.T) {
 	r := Layout(110, 30, Split)
 	require.Equal(t, Rect{0, 0, 110, 1}, r.Header)
-	require.Equal(t, Rect{0, 1, 33, 27}, r.List)
-	require.Equal(t, Rect{33, 1, 77, 27}, r.Window)
+	require.Equal(t, Rect{0, 1, 36, 27}, r.List)
+	require.Equal(t, Rect{36, 1, 74, 27}, r.Window)
 	require.Equal(t, Rect{0, 28, 110, 1}, r.Bar)
 	require.Equal(t, Rect{0, 29, 99, 1}, r.Notice)
 }

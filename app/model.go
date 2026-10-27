@@ -119,6 +119,10 @@ type home struct {
 	// naming is true while a new session's name is being typed into its row.
 	// Not an overlay: the row itself is the input.
 	naming bool
+	// windowFocused is whether the window owns the keyboard: the arrows scroll
+	// it and switch its tabs, and its border wears the accent. Otherwise the
+	// list does.
+	windowFocused bool
 	// newInstanceFinalizer is called when a session is being named and you press enter.
 	// It registers the new instance in the list after the instance has been started.
 	newInstanceFinalizer func()

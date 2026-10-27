@@ -78,7 +78,9 @@ const (
 	headerRows = 1
 	barRows    = 1
 	noticeRows = 1
-	// sideWidth is the status column's width in Wide, and the list's beside it.
+	// listWidth is the list column's width in Split and Wide; sideWidth the
+	// status column's in Wide.
+	listWidth = 36
 	sideWidth = 36
 )
 
@@ -104,14 +106,15 @@ func Layout(width, height int, mode Mode) Rects {
 		r.Strip = Rect{0, top, width, min(1, content)}
 		r.Window = Rect{0, top + r.Strip.H, width, max(content-r.Strip.H, 0)}
 	case Wide:
-		list := min(sideWidth, width)
+		list := min(listWidth, width)
 		side := min(sideWidth, max(width-list, 0))
 		r.List = Rect{0, top, list, content}
 		r.Side = Rect{width - side, top, side, content}
 		r.Window = Rect{list, top, max(width-list-side, 0), content}
 	default:
-		// List takes 30% of width, preview takes 70%
-		list := int(float32(width) * 0.3)
+		// A fixed list column: a title is as long at 200 columns as at 90, and
+		// a list that widened with the terminal spent the extra on nothing.
+		list := min(listWidth, width/2)
 		r.List = Rect{0, top, list, content}
 		r.Window = Rect{list, top, width - list, content}
 	}

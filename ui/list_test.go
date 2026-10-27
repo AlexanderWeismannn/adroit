@@ -1058,7 +1058,7 @@ func TestSyncBadgeWidthMatchesItsPlainForm(t *testing.T) {
 // statement about the wrong commit, so the badge outlives the CI verdict as the
 // pane narrows.
 func TestNarrowRowKeepsTheSyncBadgeOverTheCIVerdict(t *testing.T) {
-	r, inst := newTestRenderer(t, 30, "a-very-long-branch-name-that-cannot-fit", ci.Status{State: ci.StateSuccess, PRNumber: 4473})
+	r, inst := newTestRenderer(t, 22, "a-very-long-branch-name-that-cannot-fit", ci.Status{State: ci.StateSuccess, PRNumber: 4473})
 	inst.SetUpstreamStatus(upstream.Status{Ref: "origin/review", Behind: 3})
 
 	line := branchLineOf(t, r.Render(inst, 1, false, false, false))
@@ -1158,9 +1158,9 @@ func TestTruncationSpendsTheWholeColumn(t *testing.T) {
 // against its edges.
 func TestASessionKeepsItsBreathingRoom(t *testing.T) {
 	r, inst := newTestRenderer(t, 80, "TASK-5901-signals", ci.Status{})
-	require.Equal(t, 4, lipgloss.Height(r.Render(inst, 1, false, false, false)),
-		"a blank, the title, the branch line, a blank")
-	require.Equal(t, 4, lipgloss.Height(r.Render(inst, 1, true, false, false)),
+	require.Equal(t, 2, lipgloss.Height(r.Render(inst, 1, false, false, false)),
+		"the title line and the branch line")
+	require.Equal(t, 2, lipgloss.Height(r.Render(inst, 1, true, false, false)),
 		"and the selected row is the same height as the rest")
 
 	// Which is what the list's own accounting has to see, or the window it picks
@@ -1177,9 +1177,9 @@ func TestASessionKeepsItsBreathingRoom(t *testing.T) {
 		t.Fatalf("no row for %q", name)
 		return -1
 	}
-	require.Equal(t, 5, rowOf("two")-rowOf("one"),
-		"five rows per session: the four it draws, plus the separator between rows")
-	require.Equal(t, 5, rowOf("three")-rowOf("two"))
+	require.Equal(t, 3, rowOf("two")-rowOf("one"),
+		"three rows per session: the two it draws, plus the separator between rows")
+	require.Equal(t, 3, rowOf("three")-rowOf("two"))
 }
 
 // With eight sessions on screen, which of them has been idle two minutes and
@@ -1193,9 +1193,10 @@ func TestAQuietRowSaysHowLongItHasBeenQuiet(t *testing.T) {
 	inst.SetActivity(session.ActivityIdle, 0)
 	inst.Acknowledge()
 
+	// The age sits at the end of the branch line, so the whole row is read.
 	at := func(d time.Duration) string {
 		r.now = func() time.Time { return time.Now().Add(d) }
-		return plain(lineContaining(t, r.Render(inst, 1, false, false, false), inst.Title))
+		return plain(r.Render(inst, 1, false, false, false))
 	}
 
 	require.NotContains(t, at(20*time.Second), "0m",
@@ -1216,14 +1217,14 @@ func TestAQuietRowSaysHowLongItHasBeenQuiet(t *testing.T) {
 	fresh.Status = session.Ready
 	r.now = func() time.Time { return time.Now().Add(72 * time.Hour) }
 	age := regexp.MustCompile(`\b\d+[mhd]\b`)
-	require.NotRegexp(t, age, plain(lineContaining(t, r.Render(fresh, 1, false, false, false), fresh.Title)),
+	require.NotRegexp(t, age, plain(r.Render(fresh, 1, false, false, false)),
 		"an unknown last-active time must not render as an age")
 }
 
 // Every branch on a ticketed repository begins the same way, so cutting the
 // tail left rows distinguishable only by counting characters.
 func TestALongNameIsCutInTheMiddle(t *testing.T) {
-	r, inst := newTestRenderer(t, 46, "b", ci.Status{})
+	r, inst := newTestRenderer(t, 40, "b", ci.Status{})
 	require.NoError(t, inst.SetTitle("TASK-5901-signals-dedup-summary-key-rework"))
 
 	line := plain(lineContaining(t, r.Render(inst, 1, false, false, false), elision))
@@ -1427,17 +1428,17 @@ func TestABusyRowSaysWhatItIsDoing(t *testing.T) {
 	r, inst := newTestRenderer(t, 80, "TASK-5823-S2S", ci.Status{})
 	inst.Status = session.Paused
 	idle := r.Render(inst, 1, false, false, false)
-	require.Contains(t, idle, strings.TrimSpace(pausedMark))
+	require.Contains(t, idle, strings.TrimSpace(pausedIcon))
 
 	r.busy = map[*session.Instance]string{inst: "resuming"}
 	out := r.Render(inst, 1, false, false, false)
 	require.Contains(t, out, "resuming")
 	require.Contains(t, out, r.spinner.View())
-	require.NotContains(t, out, strings.TrimSpace(pausedMark), "the action outranks the state it is changing")
+	require.NotContains(t, out, strings.TrimSpace(pausedIcon), "the action outranks the state it is changing")
 	require.Equal(t, lipgloss.Width(idle), lipgloss.Width(out))
 
 	delete(r.busy, inst)
-	require.Contains(t, r.Render(inst, 1, false, false, false), strings.TrimSpace(pausedMark))
+	require.Contains(t, r.Render(inst, 1, false, false, false), strings.TrimSpace(pausedIcon))
 }
 
 // A list with no sessions says how to get one, in the rows that would

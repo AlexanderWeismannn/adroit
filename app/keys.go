@@ -321,9 +321,17 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 
 		return m, nil
 	case keys.KeyUp:
+		if m.windowFocused {
+			m.tabbedWindow.ScrollUp()
+			return m, m.instanceChanged()
+		}
 		m.list.Up()
 		return m, m.instanceChanged()
 	case keys.KeyDown:
+		if m.windowFocused {
+			m.tabbedWindow.ScrollDown()
+			return m, m.instanceChanged()
+		}
 		m.list.Down()
 		return m, m.instanceChanged()
 	case keys.KeyShiftUp:
@@ -339,6 +347,13 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 		m.tabbedWindow.PageDown()
 		return m, m.instanceChanged()
 	case keys.KeyTab:
+		m.setWindowFocus(!m.windowFocused)
+		return m, m.instanceChanged()
+	case keys.KeyLeft:
+		m.tabbedWindow.Prev()
+		m.menu.SetActiveTab(m.tabbedWindow.GetActiveTab())
+		return m, m.instanceChanged()
+	case keys.KeyRight:
 		m.tabbedWindow.Toggle()
 		m.menu.SetActiveTab(m.tabbedWindow.GetActiveTab())
 		return m, m.instanceChanged()
@@ -561,5 +576,18 @@ func (m *home) keydownCallback(name keys.KeyName) tea.Cmd {
 		}
 
 		return keyupMsg{}
+	}
+}
+
+// setWindowFocus hands the keyboard to the window or back to the list: the
+// borders show which, and the bar says what the arrows do there.
+func (m *home) setWindowFocus(window bool) {
+	m.windowFocused = window
+	m.list.SetFocused(!window)
+	m.tabbedWindow.SetFocused(window)
+	if window {
+		m.menu.SetState(ui.StatePane)
+	} else {
+		m.menu.SetState(ui.StateDefault)
 	}
 }

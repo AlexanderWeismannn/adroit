@@ -36,6 +36,9 @@ const (
 	StateEmpty
 	StateNewInstance
 	StatePrompt
+	// StatePane is the window owning the keyboard: the bar says what the
+	// arrows do there and the way back to the list.
+	StatePane
 )
 
 // menuGroup is a half-open range of option indices rendered as one group, with a
@@ -109,8 +112,8 @@ func (m *Menu) SetState(state MenuState) {
 // SetInstance updates the current instance and refreshes menu options
 func (m *Menu) SetInstance(instance *session.Instance) {
 	m.instance = instance
-	// Only change the state if we're not in a special state (NewInstance or Prompt)
-	if m.state != StateNewInstance && m.state != StatePrompt {
+	// Only change the state if we're not in a special state (NewInstance, Prompt, Pane)
+	if m.state != StateNewInstance && m.state != StatePrompt && m.state != StatePane {
 		if m.instance != nil {
 			m.state = StateDefault
 		} else {
@@ -196,6 +199,9 @@ func (m *Menu) updateOptions() {
 	case StatePrompt:
 		options := keys.OverlayMenu(keys.GroupPrompt)
 		m.setOptions(options, []menuGroup{{0, len(options)}}, nil)
+	case StatePane:
+		options := keys.PaneMenu()
+		m.setOptions(options, []menuGroup{{0, 3}, {3, 5}, {5, len(options)}}, nil)
 	default:
 		m.compose()
 	}
