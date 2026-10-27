@@ -139,15 +139,6 @@ func (m *home) offLoop(instance *session.Instance, doing string, work func() tea
 	return tea.Batch(cmds...)
 }
 
-// runInstanceStartCmd returns a Cmd that performs the expensive instance.Start(true)
-// in a background goroutine so the main event loop stays responsive.
-func runInstanceStartCmd(instance *session.Instance) tea.Cmd {
-	return func() tea.Msg {
-		err := instance.Start(true)
-		return instanceStartDoneMsg{instance: instance, err: err}
-	}
-}
-
 // snapshotActiveInstances returns the currently active (started, not paused)
 // instances. Called on the main thread so the filtering doesn't race with
 // state mutations.

@@ -179,7 +179,7 @@ func (m *home) instanceChanged() tea.Cmd {
 // actually changes; the metadata tick re-evaluates this twice a second, so the
 // animation restarts within a tick of a session picking work back up.
 func (m *home) spinnerNeeded() bool {
-	if m.instanceStarting || m.list.Busy() {
+	if m.list.Busy() {
 		return true
 	}
 	for _, inst := range m.list.GetInstances() {

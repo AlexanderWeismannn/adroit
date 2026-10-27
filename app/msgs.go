@@ -88,12 +88,6 @@ type metadataUpdateDoneMsg struct {
 	results []instanceMetaResult
 }
 
-// instanceStartDoneMsg is sent when the background instance start completes.
-type instanceStartDoneMsg struct {
-	instance *session.Instance
-	err      error
-}
-
 // instanceResumedMsg and instancePausedMsg carry the result of a resume or a
 // checkout's pause back from offLoop.
 type instanceResumedMsg struct {
