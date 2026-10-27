@@ -2,7 +2,9 @@ package app
 
 import (
 	"fmt"
+	"strings"
 
+	"github.com/AlexanderWeismannn/adroit/keys"
 	"github.com/AlexanderWeismannn/adroit/log"
 	"github.com/AlexanderWeismannn/adroit/session"
 	"github.com/AlexanderWeismannn/adroit/theme"
@@ -51,47 +53,30 @@ func generalHelpHeader() string {
 }
 
 func (h helpTypeGeneral) toContent() string {
-	content := lipgloss.JoinVertical(lipgloss.Left,
-		generalHelpHeader(),
-		"",
-		headerStyle.Render("Managing:"),
-		keyStyle.Render("n")+descStyle.Render("         - Create a new session"),
-		keyStyle.Render("N")+descStyle.Render("         - Create a new session with a prompt"),
-		keyStyle.Render("tab")+descStyle.Render("       - At the name prompt: pick an existing branch, or no branch at all"),
-		keyStyle.Render("D")+descStyle.Render("         - Kill (delete) the selected session"),
-		keyStyle.Render("R")+descStyle.Render("         - Restore a killed session's conversation in a fresh workspace"),
-		keyStyle.Render("↑/k, ↓/j")+descStyle.Render("  - Navigate between sessions"),
-		keyStyle.Render("1-9")+descStyle.Render("       - Select the session with that number"),
-		keyStyle.Render("]")+descStyle.Render("         - Jump to the next session waiting on you, then the next unseen finish"),
-		keyStyle.Render("J/K")+descStyle.Render("       - Reorder sessions"),
-		keyStyle.Render("↵/o")+descStyle.Render("       - Attach to the selected session"),
-		keyStyle.Render("i")+descStyle.Render("         - Send a prompt to the selected session without attaching"),
-		keyStyle.Render("ctrl-q")+descStyle.Render("    - Detach from session"),
-		"",
-		headerStyle.Render("Handoff:"),
-		keyStyle.Render("p")+descStyle.Render("         - Commit and push branch to github"),
-		keyStyle.Render("c")+descStyle.Render("         - Checkout: commit changes and pause session"),
-		keyStyle.Render("r")+descStyle.Render("         - Resume a paused session"),
-		keyStyle.Render("g")+descStyle.Render("         - Open the session's pull request in your browser"),
-		"",
-		headerStyle.Render("Running the project:"),
-		keyStyle.Render("d")+descStyle.Render("         - Run the dev stack here, moving it off another session"),
-		keyStyle.Render("x")+descStyle.Render("         - Stop it, wherever it runs. The Run tab shows its state."),
-		"",
-		headerStyle.Render("Status & badges:"),
-		// Built by ui alongside the glyphs and styles it documents, so the legend
-		// cannot drift from the rows it describes.
-		lipgloss.JoinVertical(lipgloss.Left, ui.BadgeLegend()...),
-		"",
-		headerStyle.Render("Other:"),
-		keyStyle.Render("s")+descStyle.Render("         - Settings: agents and their API keys, workspaces, options"),
-		keyStyle.Render("t")+descStyle.Render("         - Change the colour theme (previews as you move)"),
-		keyStyle.Render("tab")+descStyle.Render("       - Switch between preview, diff, terminal and run tabs"),
-		keyStyle.Render("shift-↓/↑")+descStyle.Render(" - Scroll in preview/diff/terminal/run view"),
-		keyStyle.Render("pgup/pgdn")+descStyle.Render(" - Scroll a page at a time; esc returns to the live view"),
-		keyStyle.Render("q")+descStyle.Render("         - Quit the application"),
-	)
-	return content
+	rows := []string{generalHelpHeader(), ""}
+	for i, section := range keys.HelpSections {
+		if i > 0 {
+			rows = append(rows, "")
+		}
+		rows = append(rows, headerStyle.Render(section.Title))
+		if section.Legend {
+			// Built by ui alongside the glyphs and styles it documents, so the
+			// legend cannot drift from the rows it describes.
+			rows = append(rows, lipgloss.JoinVertical(lipgloss.Left, ui.BadgeLegend()...))
+			continue
+		}
+		for _, line := range section.Lines {
+			rows = append(rows, helpRow(line.Text()))
+		}
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, rows...)
+}
+
+// helpRow is one key and what it does, the dash lined up in one column.
+func helpRow(key, desc string) string {
+	const column = 10
+	pad := strings.Repeat(" ", max(column-lipgloss.Width(key), 0))
+	return keyStyle.Render(key) + descStyle.Render(pad+"- "+desc)
 }
 
 func (h helpTypeInstanceStart) toContent() string {
