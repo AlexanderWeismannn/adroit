@@ -112,6 +112,27 @@ type TabbedWindow struct {
 	paneRate float64
 	// focused is whether the window owns the keyboard.
 	focused bool
+	// tabSpans is where each tab's name sits on the bar, as [start, end) cell
+	// columns from the window's left edge, as of the last render: what a click
+	// on the bar is resolved against.
+	tabSpans [][2]int
+}
+
+// TabAt is the tab whose name covers column x of the bar, for a click.
+func (w *TabbedWindow) TabAt(x int) (int, bool) {
+	for i, span := range w.tabSpans {
+		if x >= span[0] && x < span[1] {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
+// SetActiveTab makes the given tab active.
+func (w *TabbedWindow) SetActiveTab(tab int) {
+	if tab >= 0 && tab < len(w.tabs) {
+		w.activeTab = tab
+	}
 }
 
 // SetDevStack records which session the development stack is running for, and
@@ -450,6 +471,7 @@ func (w *TabbedWindow) tabBar(width int) string {
 	render := func(nameWidth int) (string, int) {
 		var b strings.Builder
 		used := 0
+		w.tabSpans = w.tabSpans[:0]
 		b.WriteString(w.rule().Render("╭─"))
 		used += 2
 		for i, name := range w.tabs {
@@ -471,6 +493,7 @@ func (w *TabbedWindow) tabBar(width int) string {
 				style = tabActiveLabelStyle
 			}
 			b.WriteString(style.Render(label))
+			w.tabSpans = append(w.tabSpans, [2]int{used, used + lipgloss.Width(label)})
 			used += lipgloss.Width(label)
 		}
 		b.WriteString(" ")

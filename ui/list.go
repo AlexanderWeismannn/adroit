@@ -239,6 +239,10 @@ type List struct {
 	// compact draws one line per session, for the mode where the list has the
 	// whole width and the window is behind it.
 	compact bool
+	// rowAt maps each row inside the box, top to bottom, to the session drawn
+	// on it (-1 for a blank or a scroll marker), as of the last render. It is
+	// what a click is resolved against.
+	rowAt []int
 
 	// map of repo name to number of instances using it. Used to display the repo name only if there are
 	// multiple repos in play.
@@ -1302,10 +1306,14 @@ func emptyListHint(width int) string {
 		return clip(" "+hintKeyStyle.Width(hintKeyColumn).Render(k)+hintDescStyle.Render(d), width)
 	}
 	return strings.Join([]string{
-		clip(" "+hintDescStyle.Render("No sessions yet."), width),
+		"",
+		clip(" "+titleStyle.Bold(true).Render("No sessions yet"), width),
+		clip(" "+hintDescStyle.Render("An agent in its own worktree,"), width),
+		clip(" "+hintDescStyle.Render("on its own branch."), width),
 		"",
 		row("n", "new session"),
 		row("N", "new session with a prompt"),
+		row("R", "restore a killed session"),
 		row("?", "every key"),
 	}, "\n")
 }
@@ -1417,6 +1425,7 @@ func (l *List) rows(width, height int) string {
 	}
 
 	var b strings.Builder
+	l.rowAt = l.rowAt[:0]
 	rendered := make([]string, len(l.items))
 	heights := make([]int, len(l.items))
 	total := 0
@@ -1444,21 +1453,36 @@ func (l *List) rows(width, height int) string {
 	start, end := l.window(heights, budget)
 	if start > 0 {
 		b.WriteString(scrollIndicator("↑", start) + "\n")
+		l.rowAt = append(l.rowAt, -1)
 	}
 	for i := start; i < end; i++ {
 		b.WriteString(rendered[i])
+		for n := strings.Count(rendered[i], "\n") + 1; n > 0; n-- {
+			l.rowAt = append(l.rowAt, i)
+		}
 		if i != end-1 {
 			if l.compact {
 				b.WriteString("\n")
 			} else {
 				b.WriteString("\n\n")
+				l.rowAt = append(l.rowAt, -1)
 			}
 		}
 	}
 	if end < len(l.items) {
 		b.WriteString("\n" + scrollIndicator("↓", len(l.items)-end))
+		l.rowAt = append(l.rowAt, -1)
 	}
 	return b.String()
+}
+
+// RowAt is the session drawn on row y inside the box (0 is the first row under
+// the top border), for a click. A blank row and a scroll marker are nobody's.
+func (l *List) RowAt(y int) (int, bool) {
+	if y < 0 || y >= len(l.rowAt) || l.rowAt[y] < 0 {
+		return 0, false
+	}
+	return l.rowAt[y], true
 }
 
 // AttentionCount is how many sessions are waiting on you or have a finish you

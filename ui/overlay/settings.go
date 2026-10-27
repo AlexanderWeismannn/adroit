@@ -797,12 +797,11 @@ func (s *Settings) Render() string {
 		b.WriteString("\n" + muted.Render(s.help()))
 	}
 
-	body := fitBox(b.String(), inner, settingsBodyLines)
-	// The last line of the body is the help line; the frame's footer is where
-	// it goes.
-	lines := strings.Split(body, "\n")
+	// The last line written is the help line; it is the frame's footer, taken
+	// before fitBox so that it is wrapped there rather than cut here.
+	lines := strings.Split(strings.TrimRight(b.String(), "\n"), "\n")
 	footer := strings.TrimSpace(lines[len(lines)-1])
-	body = strings.Join(lines[:len(lines)-1], "\n")
+	body := fitBox(strings.Join(lines[:len(lines)-1], "\n")+"\n", inner, settingsBodyLines-1)
 	_ = accent
 	return Frame(width, "Settings", body, footer, theme.Color(theme.Accent))
 }

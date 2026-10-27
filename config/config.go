@@ -155,6 +155,10 @@ type Config struct {
 	// GitHubCIStatus. Inside tmux the bell reaches the outer terminal, which is
 	// what makes Windows Terminal flash the taskbar of an unfocused window.
 	Bell *bool `json:"bell,omitempty"`
+	// Mouse lets a click select a row or switch a tab. Off by default: a click
+	// in a terminal multiplexer is often meant for the multiplexer, and the
+	// wheel scrolls either way.
+	Mouse *bool `json:"mouse,omitempty"`
 	// NotifyCommand, when set, is run through `sh -c` on the same events, for a
 	// desktop notification the bell cannot give. It gets ADROIT_SESSION (the
 	// session's title) and ADROIT_EVENT ("finished" or "needs-input") in its
@@ -273,6 +277,11 @@ func (c *Config) UpstreamStatusEnabled() bool {
 // BellEnabled reports whether a session needing attention rings the bell.
 func (c *Config) BellEnabled() bool {
 	return c.Bell == nil || *c.Bell
+}
+
+// MouseEnabled reports whether a click selects a row or switches a tab.
+func (c *Config) MouseEnabled() bool {
+	return c.Mouse != nil && *c.Mouse
 }
 
 // SyncBaseBranchEnabled reports whether the default branch should be brought up

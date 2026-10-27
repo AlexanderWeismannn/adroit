@@ -539,6 +539,8 @@ func (m *home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(m.instanceChanged(), m.handleError(msg.err))
 		}
 		return m, m.instanceChanged()
+	case tea.MouseClickMsg:
+		return m, m.click(msg)
 	case tea.MouseWheelMsg:
 		// The wheel scrolls the diff/preview pane.
 		selected := m.list.GetSelectedInstance()
@@ -696,4 +698,46 @@ func (m *home) handleQuit() (tea.Model, tea.Cmd) {
 		return m, m.handleError(err)
 	}
 	return m, tea.Quit
+}
+
+// click resolves a left click to the row or the tab under it, when the mouse
+// option is on and no overlay owns the screen. A click in a pane also hands it
+// the keyboard, as tab would.
+func (m *home) click(msg tea.MouseClickMsg) tea.Cmd {
+	if m.appConfig == nil || !m.appConfig.MouseEnabled() || m.overlay != nil || m.naming {
+		return nil
+	}
+	mouse := msg.Mouse()
+	if mouse.Button != tea.MouseLeft {
+		return nil
+	}
+	r := m.layout
+	within := func(rect ui.Rect) bool {
+		return !rect.Empty() && mouse.X >= rect.X && mouse.X < rect.X+rect.W && mouse.Y >= rect.Y && mouse.Y < rect.Y+rect.H
+	}
+	listShown := r.Mode != ui.Compact || !m.windowFocused
+	windowShown := r.Mode != ui.Compact || m.windowFocused
+	switch {
+	case listShown && within(r.List):
+		if m.windowFocused {
+			m.setWindowFocus(false)
+		}
+		// Row 0 is the top border.
+		if idx, ok := m.list.RowAt(mouse.Y - r.List.Y - 1); ok {
+			m.list.SetSelectedInstance(idx)
+		}
+		return m.instanceChanged()
+	case windowShown && within(r.Window):
+		if mouse.Y == r.Window.Y {
+			if tab, ok := m.tabbedWindow.TabAt(mouse.X - r.Window.X); ok {
+				m.tabbedWindow.SetActiveTab(tab)
+				m.menu.SetActiveTab(tab)
+			}
+		}
+		if !m.windowFocused {
+			m.setWindowFocus(true)
+		}
+		return m.instanceChanged()
+	}
+	return nil
 }

@@ -58,7 +58,12 @@ func Frame(width int, title, body, footer string, border color.Color) string {
 	}
 	rows = append(rows, row(""))
 	if footer != "" {
-		rows = append(rows, rule.Render("├"+strings.Repeat("─", inner)+"┤"), row(footer))
+		rows = append(rows, rule.Render("├"+strings.Repeat("─", inner)+"┤"))
+		// A long footer wraps rather than being cut: every key on it is one you
+		// can press.
+		for _, line := range strings.Split(lipgloss.NewStyle().Width(max(inner-2, 1)).Render(footer), "\n") {
+			rows = append(rows, row(line))
+		}
 	}
 	rows = append(rows, rule.Render("╰"+strings.Repeat("─", inner)+"╯"))
 	return strings.Join(rows, "\n")

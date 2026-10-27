@@ -244,3 +244,21 @@ func TestTheFooterGivesWayRatherThanWrapping(t *testing.T) {
 		require.NotContains(t, footer, "\n")
 	}
 }
+
+// A click on the bar lands on the tab whose name is under it, as the bar was
+// last drawn.
+func TestTabAtFollowsTheDrawnBar(t *testing.T) {
+	w := newTestTabbedWindow()
+	w.SetSize(80, 20)
+	_ = w.String()
+	bar := plain(strings.Split(w.String(), "\n")[0])
+	for name, tab := range map[string]int{"Preview": PreviewTab, "Diff": DiffTab, "Terminal": TerminalTab, "Run": RunTab} {
+		x := strings.Index(bar, name) // cells: the bar is ASCII and box drawing, one cell each
+		x = len([]rune(bar[:x]))
+		got, ok := w.TabAt(x + 1)
+		require.True(t, ok, name)
+		require.Equal(t, tab, got, name)
+	}
+	_, ok := w.TabAt(0)
+	require.False(t, ok, "the corner is no tab")
+}

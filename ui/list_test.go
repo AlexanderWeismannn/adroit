@@ -1430,7 +1430,7 @@ func TestAnEmptyListNamesTheKeysThatFillIt(t *testing.T) {
 	l := NewList(&s, false)
 	l.SetSize(40, 12)
 	out := l.String()
-	require.Contains(t, out, "No sessions yet.")
+	require.Contains(t, out, "No sessions yet")
 	require.Contains(t, out, "new session with a prompt")
 	for _, line := range strings.Split(out, "\n") {
 		require.LessOrEqual(t, lipgloss.Width(line), 40)
@@ -1441,4 +1441,28 @@ func TestAnEmptyListNamesTheKeysThatFillIt(t *testing.T) {
 		require.LessOrEqual(t, lipgloss.Width(line), 20)
 	}
 	require.Equal(t, 12, strings.Count(out, "\n")+1, "the body is placed to the list's height")
+}
+
+// A click lands on a row by its position in the box, which the renderer records
+// as it draws: two lines per session and a blank between, so the blank is
+// nobody's and the second line is still its session's.
+func TestRowAtFollowsTheDrawnRows(t *testing.T) {
+	l := newTestList("one", "two", "three")
+	l.SetSize(40, 20)
+	_ = l.String()
+	for y, want := range map[int]int{0: 0, 1: 0, 3: 1, 4: 1, 6: 2} {
+		got, ok := l.RowAt(y)
+		require.True(t, ok, "row %d", y)
+		require.Equal(t, want, got, "row %d", y)
+	}
+	_, ok := l.RowAt(2)
+	require.False(t, ok, "the blank between sessions is nobody's")
+	_, ok = l.RowAt(19)
+	require.False(t, ok, "below the last session")
+
+	l.SetCompact(true)
+	_ = l.String()
+	got, ok := l.RowAt(2)
+	require.True(t, ok)
+	require.Equal(t, 2, got, "one line per session in compact")
 }
