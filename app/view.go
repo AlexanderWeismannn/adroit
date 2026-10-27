@@ -3,6 +3,7 @@ package app
 import (
 	"strings"
 
+	"github.com/AlexanderWeismannn/adroit/log"
 	"github.com/AlexanderWeismannn/adroit/ui/overlay"
 
 	"github.com/charmbracelet/lipgloss"
@@ -48,10 +49,20 @@ func (m *home) fitToTerminal(view string) string {
 		return view
 	}
 	lines := strings.Split(view, "\n")
+	cut := false
 	for i, line := range lines {
 		if lipgloss.Width(line) > m.termWidth {
 			lines[i] = truncate.String(line, uint(m.termWidth))
+			cut = true
 		}
+	}
+	// Every component is given a rect and is expected to keep to it, so a cut
+	// here is a component overrunning its rect, and worth knowing about. Once
+	// per width: a terminal too narrow for the frame at all would otherwise log
+	// on every frame.
+	if cut && m.fitWarnedWidth != m.termWidth {
+		m.fitWarnedWidth = m.termWidth
+		log.WarningLog.Printf("a row overran the terminal at %d columns and was cut", m.termWidth)
 	}
 	return strings.Join(lines, "\n")
 }

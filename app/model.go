@@ -141,6 +141,11 @@ type home struct {
 	errBox *ui.ErrBox
 	// global spinner instance. we plumb this down to where it's needed
 	spinner spinner.Model
+	// layout is where every component goes for the current terminal size.
+	layout ui.Rects
+	// fitWarnedWidth is the last width at which fitToTerminal had to cut a row,
+	// logged once per width rather than once per frame.
+	fitWarnedWidth int
 	// termWidth is the terminal's own width, kept so the composed frame can be
 	// held to it. Nothing may be drawn wider than the screen: tmux clips the
 	// overflow, and what it clips is the right-hand edge of the interface.
@@ -261,22 +266,15 @@ func newHome(ctx context.Context, program string, autoYes bool) *home {
 // The components will try to render inside their bounds.
 func (m *home) updateHandleWindowSizeEvent(msg tea.WindowSizeMsg) {
 	m.termWidth = msg.Width
-	// List takes 30% of width, preview takes 70%
-	listWidth := int(float32(msg.Width) * 0.3)
-	tabsWidth := msg.Width - listWidth
+	// Every component gets its rect from the layout; nothing measures the
+	// terminal for itself. The rows add up exactly: a frame composed one row
+	// taller than the terminal scrolls the whole view by one on every redraw.
+	r := ui.Layout(msg.Width, msg.Height, ui.Split)
+	m.layout = r
+	m.errBox.SetSize(r.Notice.W, r.Notice.H)
 
-	// The menu is one row and the error box another; everything else is content.
-	// The menu used to take 10% of the height -- four or five rows at 45, for one
-	// line of text -- and those rows now go to the list and the preview.
-	//
-	// The rows must add up exactly: a frame composed one row taller than the
-	// terminal scrolls the whole view by one on every redraw.
-	const menuHeight = 1
-	contentHeight := max(msg.Height-menuHeight-1, 0) // and the error box
-	m.errBox.SetSize(int(float32(msg.Width)*0.9), 1)
-
-	m.tabbedWindow.SetSize(tabsWidth, contentHeight)
-	m.list.SetSize(listWidth, contentHeight)
+	m.tabbedWindow.SetSize(r.Window.W, r.Window.H)
+	m.list.SetSize(r.List.W, r.List.H)
 
 	if m.overlay != nil {
 		m.overlay.resize(m, msg.Width, msg.Height)
@@ -286,7 +284,7 @@ func (m *home) updateHandleWindowSizeEvent(msg tea.WindowSizeMsg) {
 	if err := m.list.SetSessionPreviewSize(previewWidth, previewHeight); err != nil {
 		log.ErrorLog.Print(err)
 	}
-	m.menu.SetSize(msg.Width, menuHeight)
+	m.menu.SetSize(r.Bar.W, r.Bar.H)
 }
 
 func (m *home) Init() tea.Cmd {
