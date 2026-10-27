@@ -2,16 +2,17 @@ package ui
 
 import (
 	"fmt"
-	"github.com/AlexanderWeismannn/adroit/cmd/cmd_test"
-	"github.com/AlexanderWeismannn/adroit/log"
-	"github.com/AlexanderWeismannn/adroit/session"
-	"github.com/AlexanderWeismannn/adroit/session/tmux"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/AlexanderWeismannn/adroit/cmd/cmd_test"
+	"github.com/AlexanderWeismannn/adroit/log"
+	"github.com/AlexanderWeismannn/adroit/session"
+	"github.com/AlexanderWeismannn/adroit/session/tmux"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/stretchr/testify/require"

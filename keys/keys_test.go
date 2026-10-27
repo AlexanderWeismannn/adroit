@@ -51,18 +51,23 @@ func TestHelpRowsNameTableKeys(t *testing.T) {
 // rows are reordered for are the ones worth pinning: the jump leads whenever it
 // is offered, and kill leads new once the pull request is merged.
 func TestOfferedLeadsWithWhatMattersMost(t *testing.T) {
-	manage, _, _ := Offered(Ctx{HasInstance: true, Attention: true, PRDone: true})
-	if len(manage) < 3 || manage[0] != KeyNextAttention || manage[1] != KeyKill || manage[2] != KeyNew {
-		t.Fatalf("manage = %v, want jump, kill, new", manage)
+	session, _, _ := Offered(Ctx{HasInstance: true, Attention: true, PRDone: true})
+	if len(session) < 3 || session[0] != KeyNextAttention || session[1] != KeyKill || session[2] != KeyEnter {
+		t.Fatalf("session = %v, want waiting, kill, attach", session)
 	}
-	manage, action, system := Offered(Ctx{})
-	if len(action) != 0 || len(system) != 4 || manage[0] != KeyNew || manage[1] != KeyPrompt {
-		t.Fatalf("empty list: manage %v action %v system %v", manage, action, system)
+	session, tools, app := Offered(Ctx{})
+	if len(session) != 0 || len(tools) != 0 || len(app) != 6 || app[0] != KeyNew || app[1] != KeyPrompt {
+		t.Fatalf("empty list: session %v tools %v app %v", session, tools, app)
 	}
-	_, action, _ = Offered(Ctx{HasInstance: true, Started: true, Paused: true})
-	for _, k := range action {
-		if k == KeyEnter || k == KeyCheckout || k == KeySendPrompt {
+	ctx := Ctx{HasInstance: true, Started: true, Paused: true}
+	session, _, _ = Offered(ctx)
+	dim := Dimmed(ctx)
+	for _, k := range session {
+		if k == KeyEnter || k == KeySendPrompt {
 			t.Errorf("a paused session offers %v", k)
 		}
+	}
+	if len(dim) != 2 || dim[0] != KeyCheckout || dim[1] != KeyOpenPR {
+		t.Errorf("a paused session dims %v, want checkout and the pull request", dim)
 	}
 }

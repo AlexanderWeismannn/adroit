@@ -75,7 +75,7 @@ type Rects struct {
 }
 
 const (
-	headerRows = 0 // drawn from step 6 of the revamp; until then the panes lead with their own blank row
+	headerRows = 1
 	barRows    = 1
 	noticeRows = 1
 	// sideWidth is the status column's width in Wide, and the list's beside it.

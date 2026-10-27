@@ -45,12 +45,13 @@ func TestLayoutFillsTheTerminalExactly(t *testing.T) {
 	}
 }
 
-// The split geometry is the one the interface has always drawn: the list takes
-// three tenths of the width and the last two rows are the bar and the notice.
+// The split geometry: a header row, the list at three tenths of the width, and
+// the last two rows for the bar and the notice.
 func TestSplitKeepsTheEstablishedGeometry(t *testing.T) {
 	r := Layout(110, 30, Split)
-	require.Equal(t, Rect{0, 0, 33, 28}, r.List)
-	require.Equal(t, Rect{33, 0, 77, 28}, r.Window)
+	require.Equal(t, Rect{0, 0, 110, 1}, r.Header)
+	require.Equal(t, Rect{0, 1, 33, 27}, r.List)
+	require.Equal(t, Rect{33, 1, 77, 27}, r.Window)
 	require.Equal(t, Rect{0, 28, 110, 1}, r.Bar)
 	require.Equal(t, Rect{0, 29, 99, 1}, r.Notice)
 }

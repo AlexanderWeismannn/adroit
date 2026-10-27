@@ -63,14 +63,15 @@ const (
 	// GroupNone is a key the menu never advertises: moving the cursor, scrolling
 	// by a line, reordering rows. The help card still lists them.
 	GroupNone Group = iota
-	// GroupManage acts on the list: new, kill, restore, the jump to a session
-	// waiting on you.
-	GroupManage
-	// GroupAction acts on the selected session: attach, prompt, push, checkout,
-	// resume, the pull request, update, the dev stack.
-	GroupAction
-	// GroupSystem acts on the interface: tab, settings, theme, help, quit.
-	GroupSystem
+	// GroupSession acts on the selected session: attach, prompt, resume,
+	// checkout, push, kill, and the jump to a session waiting on you.
+	GroupSession
+	// GroupTools acts on its branch, the dev stack and the window: update, the
+	// pull request, run and stop the stack, scroll.
+	GroupTools
+	// GroupApp acts on the interface: tab, new, restore, settings, theme, help,
+	// quit.
+	GroupApp
 	// GroupNaming is the row while a new session is being named.
 	GroupNaming
 	// GroupPrompt is the prompt overlay.
@@ -149,69 +150,65 @@ var Table = []Binding{
 	{Name: KeyPageUp, Keys: []string{"pgup"}, Key: "pgup", Label: "page up"},
 	{Name: KeyPageDown, Keys: []string{"pgdown"}, Key: "pgdn", Label: "page down"},
 
+	// -- the session --
+
 	// The jump comes first when it is offered: it is the one entry that says
 	// something about the list rather than the row.
-	{Name: KeyNextAttention, Keys: []string{"]"}, Key: "]", Label: "next waiting", Group: GroupManage,
+	{Name: KeyNextAttention, Keys: []string{"]"}, Key: "]", Label: "waiting", Group: GroupSession,
 		Help: "Jump to the next session waiting on you, then the next unseen finish",
 		When: func(c Ctx) bool { return selected(c) && c.Attention }, Lead: always},
-	{Name: KeyNew, Keys: []string{"n"}, Key: "n", Label: "new", Group: GroupManage,
-		Help: "Create a new session"},
-	{Name: KeyKill, Keys: []string{"D"}, Key: "D", Label: "kill", Group: GroupManage,
-		Help: "Kill (delete) the selected session",
-		When: selected, Lead: func(c Ctx) bool { return c.PRDone }},
-	{Name: KeyPrompt, Keys: []string{"N"}, Key: "N", Label: "new with prompt", Group: GroupManage,
-		Help: "Create a new session with a prompt",
-		When: func(c Ctx) bool { return !c.HasInstance }},
-	// Restore sits with the actions in the empty state on purpose: killing the
-	// last session is exactly when it is wanted, and that is the one moment when
-	// no row is there to carry the key.
-	{Name: KeyRestore, Keys: []string{"R"}, Key: "R", Label: "restore killed", Group: GroupManage,
-		Help: "Restore a killed session's conversation in a fresh workspace",
-		When: func(c Ctx) bool { return c.Restorable && !c.Loading }},
-
 	// Enter does nothing on a paused row (except on the Run tab, where it
 	// attaches to the stack), so it is not offered there: resume is.
-	{Name: KeyEnter, Keys: []string{"enter", "o"}, Key: "↵/o", Label: "open", Group: GroupAction,
+	{Name: KeyEnter, Keys: []string{"enter", "o"}, Key: "↵", Label: "attach", Group: GroupSession,
 		Help: "Attach to the selected session",
 		When: func(c Ctx) bool { return selected(c) && (!c.Paused || c.RunTab) }},
-	{Name: KeySendPrompt, Keys: []string{"i"}, Key: "i", Label: "send prompt", Group: GroupAction,
+	{Name: KeySendPrompt, Keys: []string{"i"}, Key: "i", Label: "prompt", Group: GroupSession,
 		Help: "Send a prompt to the selected session without attaching",
 		When: func(c Ctx) bool { return selected(c) && c.Started && !c.Paused }},
-	// A session running in the repository itself has no branch and no worktree,
-	// so push and checkout have nothing to act on -- offering them would
-	// advertise keys whose only outcome is an error. Resume is different: such a
-	// session is parked as Paused when its tmux session could not be restored (a
-	// reboot, `tmux kill-server`), and resuming starts a fresh one in the
-	// repository. Without the key that row can only be killed.
-	{Name: KeySubmit, Keys: []string{"p"}, Key: "p", Label: "push", Group: GroupAction,
+	// Resume and checkout are each other's dim twin: a running session shows
+	// resume dim, a paused one checkout, so the pair reads as one switch rather
+	// than a key that comes and goes. A session running in the repository
+	// itself has no worktree to check out, so it gets neither.
+	{Name: KeyResume, Keys: []string{"r"}, Key: "r", Label: "resume", Group: GroupSession,
+		Help: "Resume a paused session",
+		When: func(c Ctx) bool { return selected(c) && c.Paused },
+		Dim:  func(c Ctx) bool { return selected(c) && !c.Paused && !c.NoWorktree }},
+	{Name: KeyCheckout, Keys: []string{"c"}, Key: "c", Label: "checkout", Group: GroupSession,
+		Help: "Checkout: commit changes and pause session",
+		When: func(c Ctx) bool { return selected(c) && !c.NoWorktree && !c.Paused },
+		Dim:  func(c Ctx) bool { return selected(c) && !c.NoWorktree && c.Paused }},
+	// A session running in the repository itself has no branch of its own, so
+	// push has nothing to act on -- offering it would advertise a key whose
+	// only outcome is an error.
+	{Name: KeySubmit, Keys: []string{"p"}, Key: "p", Label: "push", Group: GroupSession,
 		Help: "Commit and push branch to github",
 		When: func(c Ctx) bool { return selected(c) && !c.NoWorktree }},
-	{Name: KeyResume, Keys: []string{"r"}, Key: "r", Label: "resume", Group: GroupAction,
-		Help: "Resume a paused session",
-		When: func(c Ctx) bool { return selected(c) && c.Paused }},
-	{Name: KeyCheckout, Keys: []string{"c"}, Key: "c", Label: "checkout", Group: GroupAction,
-		Help: "Checkout: commit changes and pause session",
-		When: func(c Ctx) bool { return selected(c) && !c.NoWorktree && !c.Paused }},
-	// Offered only for a session whose pull request we know exists, so the menu
-	// answers "can I open one from here" as well as "which key opens it". A row
-	// with no pull request, or with the badge switched off, does not show the
-	// key -- the alternative is advertising a key that reports a failure. Only
-	// a branch of the session's own is dimmed: on a repo session the key could
-	// never apply, and dimming it would promise one.
-	{Name: KeyOpenPR, Keys: []string{"g"}, Key: "g", Label: "open PR", Group: GroupAction,
-		Help: "Open the session's pull request in your browser",
-		When: func(c Ctx) bool { return selected(c) && c.CanOpenPR },
-		Dim:  func(c Ctx) bool { return selected(c) && !c.NoWorktree && !c.CanOpenPR }},
+	{Name: KeyKill, Keys: []string{"D"}, Key: "D", Label: "kill", Group: GroupSession,
+		Help: "Kill (delete) the selected session",
+		When: selected, Lead: func(c Ctx) bool { return c.PRDone }},
+
+	// -- the branch, the stack and the window --
+
 	// Offered only when there is something to bring in, which makes the key the
 	// prompt as well as the action: a row wearing the behind or diverged badge is
 	// also the only row that advertises the key that clears it. Ahead-only does
 	// not count -- there is nothing to update FROM, and pushing is p.
-	{Name: KeyUpdate, Keys: []string{"u"}, Key: "u", Label: "update", Group: GroupAction,
+	{Name: KeyUpdate, Keys: []string{"u"}, Key: "u", Label: "update", Group: GroupTools,
 		When: func(c Ctx) bool { return selected(c) && c.CanUpdate },
 		Dim:  func(c Ctx) bool { return selected(c) && !c.NoWorktree && !c.Paused && !c.CanUpdate }},
+	// Offered only for a session whose pull request we know exists, so the menu
+	// answers "can I open one from here" as well as "which key opens it". A row
+	// with no pull request, or with the badge switched off, shows the key dim
+	// -- the alternative is advertising a key that reports a failure. Only a
+	// branch of the session's own is dimmed: on a repo session the key could
+	// never apply, and dimming it would promise one.
+	{Name: KeyOpenPR, Keys: []string{"g"}, Key: "g", Label: "PR", Group: GroupTools,
+		Help: "Open the session's pull request in your browser",
+		When: func(c Ctx) bool { return selected(c) && c.CanOpenPR },
+		Dim:  func(c Ctx) bool { return selected(c) && !c.NoWorktree && !c.CanOpenPR }},
 	// Offered only when a stack is configured at all. With no "dev" block the key
 	// can do nothing but explain itself, and a menu entry is a promise.
-	{Name: KeyDev, Keys: []string{"d"}, Key: "d", Label: "run", Group: GroupAction,
+	{Name: KeyDev, Keys: []string{"d"}, Key: "d", Label: "dev", Group: GroupTools,
 		Help: "Run the dev stack here, moving it off another session",
 		When: func(c Ctx) bool { return selected(c) && c.DevConfigured && c.DevDir }},
 	// Stopping is offered whenever a stack is up, on every row rather than only
@@ -219,23 +216,34 @@ var Table = []Binding{
 	// previous run by title, and the session that owned it may since have been
 	// killed, so without this the only way to reach it would be to create a
 	// session first.
-	{Name: KeyDevStop, Keys: []string{"x"}, Key: "x", Label: "stop", Group: GroupAction,
+	{Name: KeyDevStop, Keys: []string{"x"}, Key: "x", Label: "stop", Group: GroupTools,
 		Help: "Stop it, wherever it runs. The Run tab shows its state.",
 		When: func(c Ctx) bool { return c.DevConfigured && c.DevRunning && !c.Loading }},
-	// Scrolling by a line is advertised on the tabs that scroll, after the
-	// session's own actions: it is about the window, not the session.
-	{Name: KeyShiftUp, Keys: []string{"shift+up"}, Key: "shift+↑", Label: "scroll", Group: GroupAction,
+	// Scrolling by a line is advertised on the tabs that scroll.
+	{Name: KeyShiftUp, Keys: []string{"shift+up"}, Key: "shift+↑", Label: "scroll", Group: GroupTools,
 		When: func(c Ctx) bool { return selected(c) && c.ScrollableTab }},
 
-	{Name: KeyTab, Keys: []string{"tab"}, Key: "tab", Label: "switch", Group: GroupSystem,
+	// -- the interface --
+
+	{Name: KeyTab, Keys: []string{"tab"}, Key: "tab", Label: "pane", Group: GroupApp,
 		Help: "Switch between preview, diff, terminal and run tabs",
 		When: selected},
-	{Name: KeySettings, Keys: []string{"s"}, Key: "s", Label: "settings", Group: GroupSystem,
+	{Name: KeyNew, Keys: []string{"n"}, Key: "n", Label: "new", Group: GroupApp,
+		Help: "Create a new session"},
+	{Name: KeyPrompt, Keys: []string{"N"}, Key: "N", Label: "new+prompt", Group: GroupApp,
+		Help: "Create a new session with a prompt",
+		When: func(c Ctx) bool { return !c.HasInstance }},
+	// Restore is offered in the empty state too, on purpose: killing the last
+	// session is exactly when it is wanted.
+	{Name: KeyRestore, Keys: []string{"R"}, Key: "R", Label: "restore", Group: GroupApp,
+		Help: "Restore a killed session's conversation in a fresh workspace",
+		When: func(c Ctx) bool { return c.Restorable && !c.Loading }},
+	{Name: KeySettings, Keys: []string{"s"}, Key: "s", Label: "settings", Group: GroupApp,
 		Help: "Settings: agents and their API keys, workspaces, options"},
-	{Name: KeyTheme, Keys: []string{"t"}, Key: "t", Label: "theme", Group: GroupSystem,
+	{Name: KeyTheme, Keys: []string{"t"}, Key: "t", Label: "theme", Group: GroupApp,
 		Help: "Change the colour theme (previews as you move)"},
-	{Name: KeyHelp, Keys: []string{"?"}, Key: "?", Label: "help", Group: GroupSystem},
-	{Name: KeyQuit, Keys: []string{"q"}, Key: "q", Label: "quit", Group: GroupSystem,
+	{Name: KeyHelp, Keys: []string{"?"}, Key: "?", Label: "help", Group: GroupApp},
+	{Name: KeyQuit, Keys: []string{"q"}, Key: "q", Label: "quit", Group: GroupApp,
 		Help: "Quit the application"},
 
 	// Captions for the overlays' own keys. Both overlay menus used to advertise
@@ -281,13 +289,19 @@ var GlobalkeyBindings = func() map[KeyName]key.Binding {
 	return m
 }()
 
-// Offered is what the menu shows for ctx: the list group, the session group and
-// the interface group, each in table order with the leading keys first.
-func Offered(ctx Ctx) (manage, action, system []KeyName) {
+// Offered is what the menu shows for ctx: the session group, the tools group
+// and the interface group, each in table order with the leading keys first.
+// A key that is offered dim is included; Dimmed says which.
+func Offered(ctx Ctx) (session, tools, app []KeyName) {
 	pick := func(g Group) []KeyName {
 		var lead, rest []KeyName
 		for _, b := range Table {
-			if b.Group != g || (b.When != nil && !b.When(ctx)) {
+			if b.Group != g {
+				continue
+			}
+			offered := b.When == nil || b.When(ctx)
+			dim := b.Dim != nil && b.Dim(ctx)
+			if !offered && !dim {
 				continue
 			}
 			if b.Lead != nil && b.Lead(ctx) {
@@ -298,7 +312,7 @@ func Offered(ctx Ctx) (manage, action, system []KeyName) {
 		}
 		return append(lead, rest...)
 	}
-	return pick(GroupManage), pick(GroupAction), pick(GroupSystem)
+	return pick(GroupSession), pick(GroupTools), pick(GroupApp)
 }
 
 // Dimmed is the keys drawn dim for ctx, in table order.

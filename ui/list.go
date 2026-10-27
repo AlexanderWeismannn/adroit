@@ -3,6 +3,10 @@ package ui
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
+	"strings"
+	"time"
+
 	"github.com/AlexanderWeismannn/adroit/log"
 	"github.com/AlexanderWeismannn/adroit/session"
 	"github.com/AlexanderWeismannn/adroit/session/ci"
@@ -10,9 +14,6 @@ import (
 	"github.com/AlexanderWeismannn/adroit/session/git"
 	"github.com/AlexanderWeismannn/adroit/session/upstream"
 	"github.com/AlexanderWeismannn/adroit/theme"
-	"path/filepath"
-	"strings"
-	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/lipgloss"
@@ -149,7 +150,7 @@ var accentBorder = lipgloss.Border{Left: "▌"}
 // unselected styles keep their padding and the two stay aligned.
 var selectedTitleStyle, selectedDescStyle lipgloss.Style
 
-var mainTitle, autoYesStyle lipgloss.Style
+var mainTitle, autoYesStyle, listRuleStyle, listLabelStyle lipgloss.Style
 
 // Styles hold a copy of their colour, so a theme change has to rebuild them
 // rather than be re-read. Registered here so a package added later cannot be
@@ -213,6 +214,8 @@ func applyListTheme() {
 		Background(selectedBg).
 		Foreground(selectedFg)
 
+	listRuleStyle = lipgloss.NewStyle().Foreground(theme.Color(theme.Accent))
+	listLabelStyle = lipgloss.NewStyle().Foreground(theme.Color(theme.Muted))
 	mainTitle = lipgloss.NewStyle().
 		Background(theme.Color(theme.Accent)).
 		Foreground(theme.Color(theme.AccentText))
@@ -260,7 +263,8 @@ func (l *List) SetSize(width, height int) {
 	width, height = max(width, 0), max(height, 0)
 	l.width = width
 	l.height = height
-	l.renderer.setWidth(width)
+	// The rows live inside the box's border.
+	l.renderer.setWidth(max(width-2, 0))
 }
 
 // SetSessionPreviewSize sets the height and width for the tmux sessions. This makes the stdout line have the correct
@@ -1247,61 +1251,33 @@ func (l *List) reclaim(heights []int, budget, last int) (start, end int) {
 }
 
 func (l *List) String() string {
-	const autoYesText = " auto-yes "
-
-	// The count is otherwise only obtainable by counting rows. Omitted at zero,
-	// where "· 0" says less than the empty-state message in the preview pane.
-	titleText := " Instances "
+	// The list is a box: its name in the top border, the selection's place in
+	// the bottom one, and the rows inside. The border is the focus mark too --
+	// the pane that owns the keyboard wears the accent, the other the muted rule
+	// -- which is why the rows no longer lead with a title row of their own.
+	inner, innerHeight := max(l.width-2, 0), max(l.height-2, 0)
+	title := "Sessions"
+	if l.autoyes {
+		title += " · auto-yes"
+	}
+	foot := ""
 	if len(l.items) > 0 {
-		titleText = fmt.Sprintf(" Instances · %d ", len(l.items))
+		foot = fmt.Sprintf("%d/%d", l.selectedIdx+1, len(l.items))
 	}
+	return frame(l.width, l.height, title, foot, l.rows(inner, innerHeight), listRuleStyle, listLabelStyle)
+}
 
-	titleLine := mainTitle.Render(titleText) + l.attentionSummary()
-
-	// Write the title.
-	//
-	// One blank row above it, not two. The pane beside it leads with the same
-	// gap, so they were both spending a row of every screen on the same piece of
-	// nothing; trimmed together they stay level, and the row goes to a session.
-	var b strings.Builder
-	b.WriteString("\n")
-
-	// Write title line
-	// add padding of 2 because the border on list items adds some extra characters
-	//
-	// Clipped to that width, because lipgloss.Place does not: given less room
-	// than its content it hands the content back whole. The rows below elide
-	// themselves, so in a narrow terminal this line alone was wider than the
-	// column it heads -- " Instances · 4 " is 15 cells against the 12 the list
-	// gets at 40 columns -- and the pane beside it was pushed off the screen.
-	titleWidth := AdjustPreviewWidth(l.width) + 2
-	if !l.autoyes {
-		b.WriteString(lipgloss.Place(
-			titleWidth, 1, lipgloss.Left, lipgloss.Bottom, clip(titleLine, titleWidth)))
-	} else {
-		half := titleWidth / 2
-		title := lipgloss.Place(
-			half, 1, lipgloss.Left, lipgloss.Bottom, clip(titleLine, half))
-		autoYes := lipgloss.Place(
-			titleWidth-half, 1, lipgloss.Right, lipgloss.Bottom,
-			clip(autoYesStyle.Render(autoYesText), titleWidth-half))
-		b.WriteString(lipgloss.JoinHorizontal(
-			lipgloss.Top, title, autoYes))
-	}
-
-	b.WriteString("\n")
-	b.WriteString("\n")
-
-	header := b.String()
-
+// rows draws the sessions into width x height, scrolled to keep the selection
+// in view.
+func (l *List) rows(width, height int) string {
 	// With nothing to list, the body says how to get something: the pane
 	// beside it names n, and the three keys that matter here are worth the
 	// rows that would otherwise be blank.
 	if len(l.items) == 0 {
-		b.WriteString(emptyListHint(l.width))
-		return lipgloss.Place(l.width, l.height, lipgloss.Left, lipgloss.Top, b.String())
+		return emptyListHint(width)
 	}
 
+	var b strings.Builder
 	rendered := make([]string, len(l.items))
 	heights := make([]int, len(l.items))
 	total := 0
@@ -1313,7 +1289,7 @@ func (l *List) String() string {
 		total += heights[i]
 	}
 
-	budget := l.height - (strings.Count(header, "\n") + 1)
+	budget := height
 	// Two rows held back for the markers, but only when something is going to be
 	// hidden -- otherwise a list that fits exactly would be scrolled for nothing.
 	if total > budget {
@@ -1333,19 +1309,19 @@ func (l *List) String() string {
 	if end < len(l.items) {
 		b.WriteString("\n" + scrollIndicator("↓", len(l.items)-end))
 	}
+	return b.String()
+}
 
-	// Nothing may be wider than the column the list was given. lipgloss.Place
-	// pads to that width but never cuts to it, and a row that overruns pushes the
-	// pane beside it off the screen -- the whole frame then renders wider than the
-	// terminal and tmux clips its right-hand edge. The row's own accounting elides
-	// the name long before this; it is the backstop for the narrow widths where
-	// there is no room left to elide into.
-	lines := strings.Split(b.String(), "\n")
-	for i, line := range lines {
-		lines[i] = clip(line, l.width)
+// AttentionCount is how many sessions are waiting on you or have a finish you
+// have not seen: the header's number.
+func (l *List) AttentionCount() int {
+	n := 0
+	for idx := range l.items {
+		if l.wantsAttention(idx) > 0 {
+			n++
+		}
 	}
-
-	return lipgloss.Place(l.width, l.height, lipgloss.Left, lipgloss.Top, strings.Join(lines, "\n"))
+	return n
 }
 
 // wantsAttention ranks what a session is asking of you: 2 for a question it

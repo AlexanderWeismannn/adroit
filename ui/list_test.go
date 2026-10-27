@@ -2,12 +2,6 @@ package ui
 
 import (
 	"fmt"
-	"github.com/AlexanderWeismannn/adroit/session"
-	"github.com/AlexanderWeismannn/adroit/session/ci"
-	"github.com/AlexanderWeismannn/adroit/session/dev"
-	"github.com/AlexanderWeismannn/adroit/session/git"
-	"github.com/AlexanderWeismannn/adroit/session/upstream"
-	"github.com/AlexanderWeismannn/adroit/theme"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -16,6 +10,13 @@ import (
 	"testing"
 	"time"
 	"unicode/utf8"
+
+	"github.com/AlexanderWeismannn/adroit/session"
+	"github.com/AlexanderWeismannn/adroit/session/ci"
+	"github.com/AlexanderWeismannn/adroit/session/dev"
+	"github.com/AlexanderWeismannn/adroit/session/git"
+	"github.com/AlexanderWeismannn/adroit/session/upstream"
+	"github.com/AlexanderWeismannn/adroit/theme"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/lipgloss"
@@ -413,7 +414,8 @@ func TestListHeaderShowsTheSessionCount(t *testing.T) {
 	inst, err := session.NewInstance(session.InstanceOptions{Title: "a", Path: ".", Program: "echo"})
 	require.NoError(t, err)
 	l.AddInstance(inst)
-	require.Contains(t, l.String(), "Instances · 1")
+	require.Contains(t, l.String(), "Sessions")
+	require.Contains(t, l.String(), "1/1", "the selection's place in the bottom border")
 }
 
 // The line means something different for a session with no branch: a directory,
@@ -784,12 +786,12 @@ func TestTheListAndTheTabbedWindowStartLevel(t *testing.T) {
 	listLines := strings.Split(l.String(), "\n")
 	tabLines := strings.Split(w.String(), "\n")
 
-	titleRow := firstRow(listLines, func(s string) bool { return strings.Contains(s, "Instances") })
+	titleRow := firstRow(listLines, func(s string) bool { return strings.Contains(s, "Sessions") })
 	tabTopRow := firstRow(tabLines, func(s string) bool { return strings.Contains(s, "╭") })
 	require.Equal(t, tabTopRow, titleRow, "the list title and the tab bar must start on the same row")
 
-	// And exactly one blank row leads both, rather than two.
-	require.Equal(t, 1, titleRow, "one blank row above the title, not two")
+	// Both open on their first row: the header strip above them is the air.
+	require.Equal(t, 0, titleRow, "no blank row above the title")
 }
 
 // The headline behaviour. A session that has ended its turn with a shell still

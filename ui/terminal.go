@@ -2,13 +2,14 @@ package ui
 
 import (
 	"fmt"
+	"os"
+	"strings"
+	"sync"
+
 	"github.com/AlexanderWeismannn/adroit/log"
 	"github.com/AlexanderWeismannn/adroit/session"
 	"github.com/AlexanderWeismannn/adroit/session/tmux"
 	"github.com/AlexanderWeismannn/adroit/theme"
-	"os"
-	"strings"
-	"sync"
 
 	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"

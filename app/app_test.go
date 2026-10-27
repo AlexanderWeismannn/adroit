@@ -638,7 +638,7 @@ func newSizedHome(t *testing.T, w, hgt int) *home {
 	stack := dev.New(nil)
 	h := &home{
 		ctx: context.Background(), appConfig: config.DefaultConfig(),
-		menu: ui.NewMenu(), errBox: ui.NewErrBox(), spinner: spin, devStack: stack,
+		menu: ui.NewMenu(), header: ui.NewHeader(), errBox: ui.NewErrBox(), spinner: spin, devStack: stack,
 		tabbedWindow: ui.NewTabbedWindow(
 			ui.NewPreviewPane(), ui.NewDiffPane(), ui.NewTerminalPane(), ui.NewRunPane(stack)),
 	}

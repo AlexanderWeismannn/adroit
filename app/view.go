@@ -11,15 +11,17 @@ import (
 )
 
 func (m *home) View() string {
-	// Each pane leads with one blank row of its own, which is all the air the top
-	// of the screen needs; a padding row here used to add a second.
+	// The header carries the counts the list's title used to.
+	m.header.Sessions = m.list.NumInstances()
+	m.header.NeedYou = m.list.AttentionCount()
 	listAndPreview := lipgloss.JoinHorizontal(lipgloss.Top, m.list.String(), m.tabbedWindow.String())
 
-	// Left, not centred: the menu spans the terminal and the panes stop just
+	// Left, not centred: the bar spans the terminal and the panes stop just
 	// short of it, so centring shifted the whole frame right by the difference
 	// and left an unused strip on each side.
 	mainView := lipgloss.JoinVertical(
 		lipgloss.Left,
+		m.header.String(),
 		listAndPreview,
 		m.menu.String(),
 		m.errBox.String(),

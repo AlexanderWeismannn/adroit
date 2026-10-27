@@ -1,8 +1,9 @@
 package ui
 
 import (
-	"github.com/AlexanderWeismannn/adroit/theme"
 	"strings"
+
+	"github.com/AlexanderWeismannn/adroit/theme"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
@@ -79,7 +80,12 @@ func (e *ErrBox) String() string {
 	if runewidth.StringWidth(text) > e.width-3 && e.width-3 >= 0 {
 		text = runewidth.Truncate(text, e.width-3, "…")
 	}
-	return lipgloss.Place(e.width, e.height, lipgloss.Center, lipgloss.Center, style.Render(text))
+	// Left, under the bar's first entry, rather than centred: the eye reads the
+	// bar from the left and the line below it from the same edge.
+	if text != "" {
+		text = " " + text
+	}
+	return lipgloss.Place(e.width, e.height, lipgloss.Left, lipgloss.Center, style.Render(text))
 }
 
 // collapse folds a multi-line message onto the box's single row. " · " reads as

@@ -13,20 +13,20 @@ import (
 	"github.com/muesli/reflow/truncate"
 )
 
-var keyStyle, descStyle, sepStyle, actionGroupStyle, menuStyle lipgloss.Style
+var keyStyle, descStyle, sepStyle lipgloss.Style
 
 func init() { theme.OnChange(applyMenuTheme) }
 
 func applyMenuTheme() {
-	keyStyle = lipgloss.NewStyle().Foreground(theme.Color(theme.Muted))
+	keyStyle = lipgloss.NewStyle().Bold(true).Foreground(theme.Color(theme.Accent))
 	descStyle = lipgloss.NewStyle().Foreground(theme.Color(theme.Muted))
 	sepStyle = lipgloss.NewStyle().Foreground(theme.Color(theme.Subtle))
-	actionGroupStyle = lipgloss.NewStyle().Foreground(theme.Color(theme.Accent))
-	menuStyle = lipgloss.NewStyle().Foreground(theme.Color(theme.Accent))
 }
 
-var separator = " • "
-var verticalSeparator = " │ "
+const (
+	entrySeparator = "  "
+	groupSeparator = "  ·  "
+)
 
 // MenuState represents different states the menu can be in
 type MenuState int
@@ -64,27 +64,21 @@ type Menu struct {
 	// not yet looked at.
 	attention bool
 
-	// groups partition options for separator placement, and actionGroup indexes
-	// the one rendered in the action colour (-1 for none).
-	//
-	// Computed alongside the options rather than as a fixed table, because the
-	// options are conditional -- a paused session offers resume where a running
-	// one offers checkout, the diff tab adds a scroll key, and a session with a
-	// pull request adds the key that opens it. A fixed table silently mismatched
-	// every one of those: with the scroll key present the separator landed before
-	// it instead of after, and the key itself rendered in the system colour.
-	groups      []menuGroup
-	actionGroup int
+	// groups partition options for separator placement: the session's keys,
+	// then the branch, stack and window keys, then the interface's. Computed
+	// alongside the options rather than as a fixed table, because the options
+	// are conditional and a fixed table silently mismatched every variation.
+	groups []menuGroup
 
 	// keyDown is the key which is pressed. The default is -1.
 	keyDown keys.KeyName
 
-	// dimmed are the action keys this row would have if its state were
-	// different: open PR on a branch whose pull request is not known yet,
-	// update on a branch level with its remote. They are drawn after the
-	// actions in the separator colour, and only while the menu has its full
-	// width. A key that simply vanished read as a bug -- "where did g go?" --
-	// where a dim one says the key exists and is waiting on something.
+	// dimmed are the keys this row would have if its state were different:
+	// open PR on a branch whose pull request is not known yet, update on a
+	// branch level with its remote, resume on a running session. They are
+	// drawn in place in the separator colour, and only while the bar has its
+	// full width. A key that simply vanished read as a bug -- "where did g
+	// go?" -- where a dim one says the key exists and is waiting on something.
 	dimmed []keys.KeyName
 }
 
@@ -197,51 +191,38 @@ func (m *Menu) ctx() keys.Ctx {
 func (m *Menu) updateOptions() {
 	switch m.state {
 	case StateNewInstance:
-		// Every option in these two is an action, so the whole row is the action
-		// group -- there is no navigation or system key to set them apart from.
 		options := keys.OverlayMenu(keys.GroupNaming)
-		m.setOptions(options, []menuGroup{{0, len(options)}}, 0)
+		m.setOptions(options, []menuGroup{{0, len(options)}}, nil)
 	case StatePrompt:
 		options := keys.OverlayMenu(keys.GroupPrompt)
-		m.setOptions(options, []menuGroup{{0, len(options)}}, 0)
+		m.setOptions(options, []menuGroup{{0, len(options)}}, nil)
 	default:
 		m.compose()
 	}
 }
 
-// compose lays the table's three groups out as the menu's: with no session the
-// list keys and the session keys are one group, in the action colour, since
-// there is nothing to set them apart from; with one, the session's own keys are
-// the action group between the list keys and the interface keys.
+// compose lays the table's groups out as the bar's: the session's keys, then
+// the branch, stack and window keys, then the interface's. A group with
+// nothing in it is left out rather than drawn as an empty gap.
 func (m *Menu) compose() {
 	ctx := m.ctx()
-	manage, action, system := keys.Offered(ctx)
-	if !ctx.HasInstance {
-		options := append(append([]keys.KeyName{}, manage...), action...)
-		actionEnd := len(options)
-		options = append(options, system...)
-		m.setOptions(options, []menuGroup{{0, actionEnd}, {actionEnd, len(options)}}, 0)
-		return
+	var options []keys.KeyName
+	var groups []menuGroup
+	session, tools, app := keys.Offered(ctx)
+	for _, g := range [][]keys.KeyName{session, tools, app} {
+		if len(g) == 0 {
+			continue
+		}
+		groups = append(groups, menuGroup{len(options), len(options) + len(g)})
+		options = append(options, g...)
 	}
-	options := append([]keys.KeyName{}, manage...)
-	actionStart := len(options)
-	options = append(options, action...)
-	actionEnd := len(options)
-	options = append(options, system...)
-	if len(action) == 0 {
-		m.setOptions(options, []menuGroup{{0, actionStart}, {actionStart, len(options)}}, -1)
-		return
-	}
-	m.setOptions(options,
-		[]menuGroup{{0, actionStart}, {actionStart, actionEnd}, {actionEnd, len(options)}}, 1)
-	m.dimmed = keys.Dimmed(ctx)
+	m.setOptions(options, groups, keys.Dimmed(ctx))
 }
 
-func (m *Menu) setOptions(options []keys.KeyName, groups []menuGroup, actionGroup int) {
+func (m *Menu) setOptions(options []keys.KeyName, groups []menuGroup, dimmed []keys.KeyName) {
 	m.options = options
 	m.groups = groups
-	m.actionGroup = actionGroup
-	m.dimmed = nil
+	m.dimmed = dimmed
 }
 
 // Dimmed reports the keys drawn dim: present on the row, inapplicable now.
@@ -278,43 +259,50 @@ func (m *Menu) SetSize(width, height int) {
 	m.height = height
 }
 
-// abbrev is how much of the menu is spelled out. The menu must fit the terminal
+// abbrev is how much of the bar is spelled out. The bar must fit the terminal
 // -- it is what sets the width of the whole view, since lipgloss.Place pads but
-// never truncates, so an over-wide menu both ran off the right edge and pushed
+// never truncates, so an over-wide bar both ran off the right edge and pushed
 // the list sideways behind an empty gutter.
 //
-// Keys are never dropped, only their descriptions, and the contextual actions
-// keep theirs longest: a key you cannot see is unreachable, where a key without
-// its gloss is merely unexplained -- and `?` explains all of them.
+// Keys are never dropped, only their words, and the session's own keys keep
+// theirs longest: a key you cannot see is unreachable, where a key without its
+// gloss is merely unexplained -- and `?` explains all of them.
 type abbrev int
 
 const (
 	abbrevNone abbrev = iota
-	// abbrevSystem: tab, theme, help, quit lose their words first. They are the
-	// same on every screen, so they are the ones already known.
-	abbrevSystem
-	// abbrevManagement: new and kill follow.
-	abbrevManagement
+	// abbrevDims: the dim keys go first. A key that cannot be pressed to any
+	// effect is the first thing to give way when room is short.
+	abbrevDims
+	// abbrevApp: tab, new, settings, theme, help, quit lose their words next.
+	// They are the same on every screen, so they are the ones already known.
+	abbrevApp
+	// abbrevTools: update, PR, dev, stop, scroll follow.
+	abbrevTools
 	// abbrevAll: keys only.
 	abbrevAll
 )
 
-// spellsOut reports whether the option at i keeps its description at this level.
+// spellsOut reports whether the option at i keeps its word at this level.
 func (m *Menu) spellsOut(i int, level abbrev) bool {
 	switch level {
-	case abbrevNone:
+	case abbrevNone, abbrevDims:
 		return true
 	case abbrevAll:
 		return false
 	}
 	group := m.groupOf(i)
-	if group < 0 || group == m.actionGroup {
+	if group < 0 || len(m.groups) == 1 {
 		return true
 	}
-	if level == abbrevSystem {
-		return group != len(m.groups)-1
+	// Groups are session, tools, app, in that order; an absent group shifts the
+	// rest down, so the last group is always the app's and the one before it
+	// the tools' (when there are three).
+	last := len(m.groups) - 1
+	if level == abbrevApp {
+		return group != last
 	}
-	return false
+	return group < last-1
 }
 
 // groupOf returns the index of the group option i belongs to, or -1.
@@ -327,6 +315,17 @@ func (m *Menu) groupOf(i int) int {
 	return -1
 }
 
+func (m *Menu) isDim(k keys.KeyName) bool {
+	for _, d := range m.dimmed {
+		if d == k {
+			return true
+		}
+	}
+	return false
+}
+
+// String draws the bar, left-aligned on its row, spelling out as much as the
+// width allows.
 func (m *Menu) String() string {
 	// The options are re-derived here rather than only when the selection changes,
 	// because one of them turns on a fact that arrives later: the CI lookup runs in
@@ -335,84 +334,64 @@ func (m *Menu) String() string {
 	m.updateOptions()
 
 	rendered := m.renderAt(abbrevNone)
-	for _, level := range []abbrev{abbrevSystem, abbrevManagement, abbrevAll} {
+	for _, level := range []abbrev{abbrevDims, abbrevApp, abbrevTools, abbrevAll} {
 		if m.width <= 0 || lipgloss.Width(rendered) <= m.width {
 			break
 		}
 		rendered = m.renderAt(level)
 	}
 	// Even keys alone overflow a narrow enough terminal. Cut rather than let it
-	// wrap: a wrapped menu takes its second row from the panes above it.
+	// wrap: a wrapped bar takes its second row from the panes above it.
 	if m.width > 0 && lipgloss.Width(rendered) > m.width {
 		rendered = truncate.StringWithTail(rendered, uint(m.width), "…")
 	}
 
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, menuStyle.Render(rendered))
+	return lipgloss.Place(m.width, m.height, lipgloss.Left, lipgloss.Center, rendered)
 }
 
+// renderAt draws every entry as "key word", two spaces between entries and a
+// dot between groups:
+//
+//	↵ attach  i prompt  r resume  c checkout  p push  D kill  ·  u update  g PR  ·  tab pane  n new  ? help  q quit
+//
+// A dim entry is drawn in the separator colour, in its place, and only at full
+// width: a key that cannot be pressed to any effect is the first thing to give
+// way when room is short.
 func (m *Menu) renderAt(level abbrev) string {
 	var s strings.Builder
+	s.WriteString(" ")
 
+	wrote, lastGroup := 0, -1 // entries written so far, and the group of the last one
 	for i, k := range m.options {
-		binding := keys.GlobalkeyBindings[k]
+		dim := m.isDim(k)
+		if dim && level != abbrevNone {
+			continue
+		}
+		if group := m.groupOf(i); wrote > 0 && group != lastGroup {
+			s.WriteString(sepStyle.Render(groupSeparator))
+		} else if wrote > 0 {
+			s.WriteString(entrySeparator)
+		}
+		lastGroup = m.groupOf(i)
+		wrote++
 
-		var (
-			localActionStyle = actionGroupStyle
-			localKeyStyle    = keyStyle
-			localDescStyle   = descStyle
-		)
+		binding := keys.GlobalkeyBindings[k]
+		keyText, word := binding.Help().Key, binding.Help().Desc
+		if !m.spellsOut(i, level) {
+			word = ""
+		}
+		localKeyStyle, localDescStyle := keyStyle, descStyle
+		if dim {
+			localKeyStyle, localDescStyle = sepStyle, sepStyle
+		}
 		if m.keyDown == k {
-			localActionStyle = localActionStyle.Underline(true)
 			localKeyStyle = localKeyStyle.Underline(true)
 			localDescStyle = localDescStyle.Underline(true)
 		}
-
-		inActionGroup := m.actionGroup >= 0 && m.actionGroup < len(m.groups) &&
-			i >= m.groups[m.actionGroup].start && i < m.groups[m.actionGroup].end
-
-		keyText, descText := binding.Help().Key, binding.Help().Desc
-		if !m.spellsOut(i, level) {
-			descText = ""
-		}
-
-		if inActionGroup {
-			s.WriteString(localActionStyle.Render(keyText))
-			if descText != "" {
-				s.WriteString(" ")
-				s.WriteString(localActionStyle.Render(descText))
-			}
-		} else {
-			s.WriteString(localKeyStyle.Render(keyText))
-			if descText != "" {
-				s.WriteString(" ")
-				s.WriteString(localDescStyle.Render(descText))
-			}
-		}
-
-		// The dim keys follow the last action, inside the group, and only at
-		// full width: a key that cannot be pressed to any effect is the first
-		// thing to give way when room is short.
-		if level == abbrevNone && m.actionGroup >= 0 && m.actionGroup < len(m.groups) &&
-			i == m.groups[m.actionGroup].end-1 {
-			for _, k := range m.dimmed {
-				b := keys.GlobalkeyBindings[k]
-				s.WriteString(sepStyle.Render(separator + b.Help().Key + " " + b.Help().Desc))
-			}
-		}
-
-		// Add appropriate separator
-		if i != len(m.options)-1 {
-			isGroupEnd := false
-			for _, group := range m.groups {
-				if i == group.end-1 {
-					s.WriteString(sepStyle.Render(verticalSeparator))
-					isGroupEnd = true
-					break
-				}
-			}
-			if !isGroupEnd {
-				s.WriteString(sepStyle.Render(separator))
-			}
+		s.WriteString(localKeyStyle.Render(keyText))
+		if word != "" {
+			s.WriteString(" ")
+			s.WriteString(localDescStyle.Render(word))
 		}
 	}
 	return s.String()

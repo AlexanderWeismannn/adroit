@@ -1,12 +1,13 @@
 package ui
 
 import (
+	"strings"
+	"testing"
+
 	"github.com/AlexanderWeismannn/adroit/keys"
 	"github.com/AlexanderWeismannn/adroit/session"
 	"github.com/AlexanderWeismannn/adroit/session/ci"
 	"github.com/AlexanderWeismannn/adroit/session/upstream"
-	"strings"
-	"testing"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/stretchr/testify/require"
@@ -46,7 +47,7 @@ func TestMenuOffersOpenPROnlyWithAPullRequest(t *testing.T) {
 			require.Equal(t, tt.want, hasOption(m, keys.KeyOpenPR))
 			// Said either way: offered in the action colour, or dim after the
 			// actions so its absence is seen to be deliberate.
-			require.Contains(t, m.String(), "open PR")
+			require.Contains(t, m.String(), "g PR")
 			require.Equal(t, !tt.want, isDimmed(m, keys.KeyOpenPR))
 		})
 	}
@@ -61,11 +62,11 @@ func TestDimmedKeysGiveWayFirstAndNeverApplyToARepoSession(t *testing.T) {
 	require.True(t, isDimmed(m, keys.KeyOpenPR))
 	require.True(t, isDimmed(m, keys.KeyUpdate))
 	full := m.String()
-	require.Contains(t, full, "open PR")
+	require.Contains(t, full, "g PR")
 
 	// Abbreviated, the dim keys are gone before any real key loses its word.
-	abbreviated := m.renderAt(abbrevSystem)
-	require.NotContains(t, abbreviated, "open PR")
+	abbreviated := m.renderAt(abbrevApp)
+	require.NotContains(t, abbreviated, "g PR")
 	require.NotContains(t, abbreviated, "update")
 	require.Contains(t, abbreviated, "push")
 
@@ -73,7 +74,7 @@ func TestDimmedKeysGiveWayFirstAndNeverApplyToARepoSession(t *testing.T) {
 	require.NoError(t, err)
 	m.SetInstance(repo)
 	require.Empty(t, m.Dimmed())
-	require.NotContains(t, m.String(), "open PR")
+	require.NotContains(t, m.String(), "g PR")
 }
 
 func isDimmed(m *Menu, key keys.KeyName) bool {
@@ -121,27 +122,29 @@ func TestMenuGroupsTrackTheOptions(t *testing.T) {
 			require.Equal(t, len(m.options), m.groups[len(m.groups)-1].end,
 				"withPR=%v tab=%d: groups do not cover every option", withPR, tab)
 
-			action := m.groups[m.actionGroup]
+			session, tools := m.groups[0], m.groups[1]
 			for _, k := range []keys.KeyName{keys.KeyEnter, keys.KeySubmit} {
-				require.True(t, inRange(m, k, action), "withPR=%v tab=%d: %v left the action group", withPR, tab, k)
+				require.True(t, inRange(m, k, session), "withPR=%v tab=%d: %v left the session group", withPR, tab, k)
 			}
 			if withPR {
-				require.True(t, inRange(m, keys.KeyOpenPR, action),
-					"tab=%d: the open-PR key must be an action, not a system key", tab)
+				require.True(t, inRange(m, keys.KeyOpenPR, tools),
+					"tab=%d: the open-PR key must be a tool, not an interface key", tab)
 			}
 			if tab == DiffTab {
-				require.True(t, inRange(m, keys.KeyShiftUp, action),
-					"withPR=%v: the scroll key must be an action, not a system key", withPR)
+				require.True(t, inRange(m, keys.KeyShiftUp, tools),
+					"withPR=%v: the scroll key must be a tool, not an interface key", withPR)
 			}
 		}
 	}
 }
 
+// hasOption reports whether the key is offered for real: on the bar and not
+// dim.
 func hasOption(m *Menu, want keys.KeyName) bool {
 	m.updateOptions()
 	for _, k := range m.options {
 		if k == want {
-			return true
+			return !isDimmed(m, want)
 		}
 	}
 	return false
@@ -207,7 +210,7 @@ func TestMenuHidesWorktreeActionsForARepoSession(t *testing.T) {
 	require.NotContains(t, rendered, " push")
 	require.NotContains(t, rendered, "checkout")
 	// What it can still do.
-	require.Contains(t, rendered, "open")
+	require.Contains(t, rendered, "attach")
 	require.Contains(t, rendered, "kill")
 
 	require.False(t, hasOption(m, keys.KeySubmit))
@@ -218,7 +221,7 @@ func TestMenuHidesWorktreeActionsForARepoSession(t *testing.T) {
 	// The groups are computed from the options actually built, so dropping two
 	// must not leave a separator mid-group or colour the wrong keys.
 	require.Equal(t, len(m.options), m.groups[len(m.groups)-1].end)
-	require.True(t, inRange(m, keys.KeyEnter, m.groups[m.actionGroup]))
+	require.True(t, inRange(m, keys.KeyEnter, m.groups[0]))
 }
 
 // Resume is the one worktree-shaped action a repo session does need. It is parked
@@ -244,7 +247,7 @@ func TestMenuOffersResumeForAPausedRepoSession(t *testing.T) {
 	require.False(t, hasOption(m, keys.KeyCheckout))
 
 	require.Equal(t, len(m.options), m.groups[len(m.groups)-1].end)
-	require.True(t, inRange(m, keys.KeyResume, m.groups[m.actionGroup]))
+	require.True(t, inRange(m, keys.KeyResume, m.groups[0]))
 }
 
 // The key is only worth advertising where it can do something: the menu is a
@@ -256,11 +259,11 @@ func TestMenuOffersTheDevKeyOnlyWhenAStackIsConfigured(t *testing.T) {
 	m.SetInstance(newDevMenuInstance(t, false))
 
 	require.False(t, hasOption(m, keys.KeyDev), "unconfigured, the key must not be offered")
-	require.NotContains(t, m.String(), "d run")
+	require.NotContains(t, m.String(), "d dev")
 
 	m.SetDevEnabled(true)
 	require.True(t, hasOption(m, keys.KeyDev))
-	require.Contains(t, m.String(), "d run")
+	require.Contains(t, m.String(), "d dev")
 }
 
 // Both shapes of session have somewhere to run: a worktree session in its
@@ -419,11 +422,13 @@ func TestTheMenuGivesUpSystemDescriptionsFirst(t *testing.T) {
 	m.SetDevRunning(true)
 	m.SetInstance(newDevMenuInstance(t, false))
 
-	// One column short of what the full menu needs, whatever that happens to be:
-	// pinning a literal width would only be testing the current label lengths.
+	// One column short of what the bar needs once the dim keys have given way,
+	// whatever that happens to be: pinning a literal width would only be testing
+	// the current label lengths.
 	m.SetSize(0, 1)
-	full := lipgloss.Width(strings.TrimSpace(ansiCodes.ReplaceAllString(m.String(), "")))
-	m.SetSize(full-1, 1)
+	m.updateOptions()
+	withoutDims := lipgloss.Width(strings.TrimRight(ansiCodes.ReplaceAllString(m.renderAt(abbrevDims), ""), " "))
+	m.SetSize(withoutDims-1, 1)
 
 	rendered := ansiCodes.ReplaceAllString(m.String(), "")
 	require.Contains(t, rendered, "p push", "an action keeps its description")

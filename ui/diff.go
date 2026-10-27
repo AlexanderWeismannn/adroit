@@ -2,10 +2,11 @@ package ui
 
 import (
 	"fmt"
-	"github.com/AlexanderWeismannn/adroit/session"
-	"github.com/AlexanderWeismannn/adroit/theme"
 	"strings"
 	"time"
+
+	"github.com/AlexanderWeismannn/adroit/session"
+	"github.com/AlexanderWeismannn/adroit/theme"
 
 	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"

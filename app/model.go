@@ -131,6 +131,8 @@ type home struct {
 
 	// -- UI Components --
 
+	// header is the strip along the top: where you are, the counts, the mode.
+	header *ui.Header
 	// list displays the list of instances
 	list *ui.List
 	// menu displays the bottom menu
@@ -193,6 +195,7 @@ func newHome(ctx context.Context, program string, autoYes bool) *home {
 		ctx:     ctx,
 		spinner: spinner.New(spinner.WithSpinner(spinner.MiniDot)),
 		menu:    ui.NewMenu(),
+		header:  ui.NewHeader(),
 		tabbedWindow: ui.NewTabbedWindow(
 			ui.NewPreviewPane(), ui.NewDiffPane(), ui.NewTerminalPane(), ui.NewRunPane(devStack)),
 		errBox:            ui.NewErrBox(),
@@ -211,6 +214,10 @@ func newHome(ctx context.Context, program string, autoYes bool) *home {
 	// rather than per keystroke. A directory that is not a repository leaves the
 	// global rules in place; the creation itself will say so.
 	h.namingRepo, _ = git.RepoRoot(".")
+	h.header.Repo = shortenHome(h.namingRepo)
+	// The repository's own branch, read once: it is where new sessions branch
+	// from, and the header says so. A detached HEAD leaves it blank.
+	h.header.Base, _ = git.CurrentBranch(h.namingRepo)
 	h.list.SetBranchNaming(appConfig.BranchPrefixFor(h.namingRepo), appConfig.PreserveBranchCaseFor(h.namingRepo))
 	h.menu.SetDevEnabled(devStack.Configured())
 	h.menu.SetRestorable(len(appState.GetKilledSessions()) > 0)
@@ -271,6 +278,8 @@ func (m *home) updateHandleWindowSizeEvent(msg tea.WindowSizeMsg) {
 	// taller than the terminal scrolls the whole view by one on every redraw.
 	r := ui.Layout(msg.Width, msg.Height, ui.Split)
 	m.layout = r
+	m.header.SetWidth(r.Header.W)
+	m.header.Mode, m.header.Cols, m.header.Rows = r.Mode.String(), msg.Width, msg.Height
 	m.errBox.SetSize(r.Notice.W, r.Notice.H)
 
 	m.tabbedWindow.SetSize(r.Window.W, r.Window.H)
@@ -617,4 +626,21 @@ func (m *home) handleQuit() (tea.Model, tea.Cmd) {
 		return m, m.handleError(err)
 	}
 	return m, tea.Quit
+}
+
+// shortenHome writes a path the way it is typed at a shell: ~ for the home
+// directory.
+func shortenHome(path string) string {
+	if path == "" {
+		return ""
+	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		if path == home {
+			return "~"
+		}
+		if strings.HasPrefix(path, home+string(filepath.Separator)) {
+			return "~" + path[len(home):]
+		}
+	}
+	return path
 }

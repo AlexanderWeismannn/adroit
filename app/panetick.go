@@ -175,6 +175,7 @@ func paneTickCmd(tab int, selected *session.Instance, sample paneSampler, lastHa
 // paneTick builds the next tick from the current state of the interface.
 func (m *home) paneTick() tea.Cmd {
 	tab, sample := m.paneSampler()
+	m.tabbedWindow.SetPaneRate(float64(time.Second) / float64(paneInterval(time.Since(m.paneChanged))))
 	return paneTickCmd(tab, m.list.GetSelectedInstance(), sample, m.paneHash, m.paneChanged)
 }
 

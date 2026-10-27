@@ -1,9 +1,11 @@
 package ui
 
 import (
-	"github.com/AlexanderWeismannn/adroit/log"
+	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/AlexanderWeismannn/adroit/log"
 
 	"github.com/AlexanderWeismannn/adroit/session"
 	"github.com/AlexanderWeismannn/adroit/session/dev"
@@ -27,9 +29,9 @@ func applyTabTheme() {
 	tabRuleStyle = lipgloss.NewStyle().Foreground(highlightColor)
 	tabLabelStyle = lipgloss.NewStyle().Foreground(theme.Color(theme.Muted))
 	tabActiveLabelStyle = lipgloss.NewStyle().
-		Background(highlightColor).
-		Foreground(theme.Color(theme.AccentText)).
-		Bold(true)
+		Foreground(theme.Color(theme.Text)).
+		Bold(true).
+		Underline(true)
 	// Neither the top nor the bottom border is lipgloss's: the tab bar is the
 	// top and the status footer is the bottom, each a rule with words set into
 	// it, so the window pays no rows for chrome that says nothing.
@@ -81,6 +83,10 @@ type TabbedWindow struct {
 	// session exists, which forks a process, and this renders every frame.
 	devStackTitle string
 	devStackState dev.LampState
+
+	// paneRate is how often the live pane is sampled, per second, for the
+	// footer.
+	paneRate float64
 }
 
 // SetDevStack records which session the development stack is running for, and
@@ -163,7 +169,7 @@ func (w *TabbedWindow) SetSize(width, height int) {
 	// A terminal that is still opening can report fewer rows than that chrome
 	// takes, and a negative budget reached the panes: the preview sliced with it
 	// and panicked on the first frame. Nothing is left to draw, so draw nothing.
-	contentHeight := max(height-tabBarHeight-footerHeight-windowStyle.GetVerticalFrameSize()-1, 0)
+	contentHeight := max(height-tabBarHeight-footerHeight-windowStyle.GetVerticalFrameSize(), 0)
 	contentWidth := max(w.width-windowStyle.GetHorizontalFrameSize(), 0)
 
 	w.preview.SetSize(contentWidth, contentHeight)
@@ -392,107 +398,81 @@ func (w *TabbedWindow) ResetTerminalToNormalMode() {
 // tabBarHeight is the rows the tab bar takes: one.
 const tabBarHeight = 1
 
-// tabLabel is one tab's name and, where it has one, what it would tell you if
-// you switched to it -- so the bar answers "is there a diff, is the stack up, am
-// I scrolled" from whichever tab you are on.
-func (w *TabbedWindow) tabLabel(tab int) (name, status string) {
-	switch tab {
-	case PreviewTab:
-		name = "Preview"
-		if w.preview.isScrolling {
-			status = "⇡ scrolled"
-		}
-	case DiffTab:
-		name = "Diff"
-		if w.instance != nil {
-			if st := w.instance.GetDiffStats(); st != nil && st.Error == nil && !st.IsEmpty() {
-				var parts []string
-				if st.Added > 0 {
-					parts = append(parts, addedLinesStyle.Render("+"+compactCount(st.Added)))
-				}
-				if st.Removed > 0 {
-					parts = append(parts, removedLinesStyle.Render("−"+compactCount(st.Removed)))
-				}
-				status = strings.Join(parts, " ")
-			}
-		}
-		if w.diff.IsScrolling() {
-			status = strings.TrimSpace(status + " ⇡")
-		}
-	case TerminalTab:
-		name = "Terminal"
-		if w.terminal.IsScrolling() {
-			status = "⇡ scrolled"
-		}
-	case RunTab:
-		name = "Run"
-		if label := w.runTabLabel(len(name) + 2); label != name {
-			status = strings.TrimSpace(strings.TrimPrefix(label, name))
-		}
-		if w.run.IsScrolling() {
-			status = strings.TrimSpace(status + " ⇡")
-		}
-	}
-	return name, status
-}
-
 // tabBar draws the tabs as the window's top border, exactly width cells wide:
 //
-//	╭─ Preview ─┬─ Diff +25k −2.4k ─┬─ Terminal ─┬─ Run ● ──────────╮
+//	╭─ Preview · Diff · Terminal · Run ───────────────────╮
 //
-// The active tab is reverse video in the accent. A bar too narrow for every
-// label drops the statuses first and then shortens the names, and never wraps:
-// a wrapped bar is a second row that pushes the whole pane down.
+// Names only: what a tab would tell you -- the diff's size, whether the stack
+// is up, whether you are scrolled -- is said in the footer below, and in the
+// status column where there is one. The active tab is underlined. A bar too
+// narrow for every name shortens them, and never wraps: a wrapped bar is a
+// second row that pushes the whole pane down.
 func (w *TabbedWindow) tabBar(width int) string {
 	if width < 4 {
 		return ""
 	}
-	type tab struct{ name, status string }
-	tabs := make([]tab, len(w.tabs))
-	for i := range w.tabs {
-		n, st := w.tabLabel(i)
-		tabs[i] = tab{n, st}
-	}
-	render := func(withStatus bool, nameWidth int) (string, int) {
+	render := func(nameWidth int) (string, int) {
 		var b strings.Builder
 		used := 0
 		b.WriteString(tabRuleStyle.Render("╭─"))
 		used += 2
-		for i, t := range tabs {
+		for i, name := range w.tabs {
 			if i > 0 {
-				b.WriteString(tabRuleStyle.Render("─┬─"))
+				b.WriteString(tabLabelStyle.Render(" · "))
 				used += 3
+			} else {
+				b.WriteString(" ")
+				used++
 			}
-			label := t.name
+			label := name
 			if nameWidth > 0 && lipgloss.Width(label) > nameWidth {
 				label = clip(label, nameWidth)
 			}
-			text := " " + label + " "
 			style := tabLabelStyle
 			if i == w.activeTab {
 				style = tabActiveLabelStyle
 			}
-			b.WriteString(style.Render(text))
-			used += lipgloss.Width(text)
-			if withStatus && t.status != "" {
-				b.WriteString(t.status + " ")
-				used += lipgloss.Width(t.status) + 1
-			}
+			b.WriteString(style.Render(label))
+			used += lipgloss.Width(label)
 		}
+		b.WriteString(" ")
+		used++
 		return b.String(), used
 	}
-	bar, used := render(true, 0)
-	if used+2 > width {
-		bar, used = render(false, 0)
-	}
+	bar, used := render(0)
 	for nameWidth := 8; used+2 > width && nameWidth >= 1; nameWidth-- {
-		bar, used = render(false, nameWidth)
+		bar, used = render(nameWidth)
 	}
 	fill := width - used - 1
 	if fill < 0 {
 		return clip(bar, width)
 	}
 	return bar + tabRuleStyle.Render(strings.Repeat("─", fill)+"╮")
+}
+
+// diffSummary is the diff's size, as the footer says it: "+25k −2.4k".
+func (w *TabbedWindow) diffSummary() string {
+	if w.instance == nil {
+		return ""
+	}
+	st := w.instance.GetDiffStats()
+	if st == nil || st.Error != nil || st.IsEmpty() {
+		return ""
+	}
+	var parts []string
+	if st.Added > 0 {
+		parts = append(parts, addedLinesStyle.Render("+"+compactCount(st.Added)))
+	}
+	if st.Removed > 0 {
+		parts = append(parts, removedLinesStyle.Render("−"+compactCount(st.Removed)))
+	}
+	return strings.Join(parts, " ")
+}
+
+// SetPaneRate records how often the live pane is being sampled, which the
+// footer shows beside "live": the number says the pane is moving.
+func (w *TabbedWindow) SetPaneRate(perSecond float64) {
+	w.paneRate = perSecond
 }
 
 // paneStatus is the footer's one phrase: whether what the pane shows is the
@@ -504,9 +484,11 @@ func (w *TabbedWindow) tabBar(width int) string {
 // -- each was a still pane under the same border as a live one, and the only
 // way to tell was to wait and see whether anything moved.
 func (w *TabbedWindow) paneStatus() (text string, style lipgloss.Style) {
-	live := func() (string, lipgloss.Style) { return "● live", footerLiveStyle }
-	scrolled := func(back string) (string, lipgloss.Style) {
-		return "⇡ scrolled · esc " + back, tabLabelStyle
+	live := func() (string, lipgloss.Style) {
+		if w.paneRate > 0 {
+			return fmt.Sprintf("● live · %g/s", w.paneRate), footerLiveStyle
+		}
+		return "● live", footerLiveStyle
 	}
 	switch w.activeTab {
 	case PreviewTab:
@@ -520,22 +502,28 @@ func (w *TabbedWindow) paneStatus() (text string, style lipgloss.Style) {
 		}
 		return live()
 	case DiffTab:
+		summary := w.diffSummary()
 		if w.diff.IsScrolling() {
-			return scrolled("returns to the top")
+			return strings.TrimSpace("↕ scrolled · " + summary), tabLabelStyle
 		}
+		return summary, tabLabelStyle
 	case TerminalTab:
 		if w.terminal.IsScrolling() {
-			return scrolled("returns to the live view")
+			return "↕ scrolled", tabLabelStyle
 		}
 		if w.instance != nil && w.instance.Started() && w.instance.Status != session.Paused {
 			return live()
 		}
 	case RunTab:
 		if w.run.IsScrolling() {
-			return scrolled("returns to the live view")
+			return "↕ scrolled", tabLabelStyle
 		}
 		if w.run.running() {
 			return live()
+		}
+		if label := w.runTabLabel(len("Run") + 2); label != "Run" {
+			// The stack is up for another session: say so, with its mark.
+			return strings.TrimSpace(strings.TrimPrefix(label, "Run")) + " " + w.devStackTitle, tabLabelStyle
 		}
 	}
 	return "", tabLabelStyle
@@ -599,13 +587,11 @@ func (w *TabbedWindow) String() string {
 	}
 	window := windowStyle.Render(
 		lipgloss.Place(
-			w.width, w.height-1-windowStyle.GetVerticalFrameSize()-tabBarHeight-footerHeight,
+			w.width, w.height-windowStyle.GetVerticalFrameSize()-tabBarHeight-footerHeight,
 			lipgloss.Left, lipgloss.Top, content))
 	footer := w.footer(w.width + windowStyle.GetHorizontalFrameSize())
 
-	// One blank row above the tabs, matching the single row the list leads with,
-	// so the two panes start level. A bare "\n" is two rows, not one.
-	composed := lipgloss.JoinVertical(lipgloss.Left, "", row, window, footer)
+	composed := lipgloss.JoinVertical(lipgloss.Left, row, window, footer)
 
 	// The window is a fixed-size pane, so it must occupy exactly the rows it was
 	// given. A pane whose content does not fit -- the splash in a short terminal

@@ -1,11 +1,12 @@
 package app
 
 import (
-	"github.com/AlexanderWeismannn/adroit/log"
-	"github.com/AlexanderWeismannn/adroit/session"
 	"os"
 	"os/exec"
 	"time"
+
+	"github.com/AlexanderWeismannn/adroit/log"
+	"github.com/AlexanderWeismannn/adroit/session"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
