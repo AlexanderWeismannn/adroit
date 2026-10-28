@@ -859,6 +859,14 @@ func (r *InstanceRenderer) busyMark(i *session.Instance, bg color.Color) (string
 	return workingStyle.Background(bg).Render(mark), ansi.StringWidth(mark)
 }
 
+// diffSegment is the diff count with the space before it, painted, or nothing.
+func diffSegment(diff string, bg color.Color) string {
+	if diff == "" {
+		return ""
+	}
+	return lipgloss.NewStyle().Background(bg).Render(" ") + diff
+}
+
 // RenderCompact draws a session on one line, for the compact mode and the
 // strip above the window: the glyph, the title, the branch, and at the right
 // the marks the two-line row spreads over its lines.
@@ -1077,7 +1085,7 @@ func (r *InstanceRenderer) Render(i *session.Instance, idx int, selected bool, h
 		// Compact: "+25064 -2387" cost the row enough width that the badge
 		// beside it lost every one of its words; "+25k -2.4k" pays for them.
 		addedDiff = "+" + compactCount(stat.Added)
-		removedDiff = "-" + compactCount(stat.Removed) + " "
+		removedDiff = "-" + compactCount(stat.Removed)
 		// A space rather than a comma: the two counts are separate quantities, not
 		// a list, and "+2200,-12" reads as one token. Same width either way, so the
 		// accounting below is unaffected.
@@ -1097,7 +1105,7 @@ func (r *InstanceRenderer) Render(i *session.Instance, idx int, selected bool, h
 
 	diffWidth := ansi.StringWidth(addedDiff) + ansi.StringWidth(removedDiff)
 	if diffWidth > 0 {
-		diffWidth += 1
+		diffWidth += 2 // the space between the counts and the one before them
 	}
 
 	// Use fixed width for diff stats to avoid layout issues
@@ -1284,10 +1292,15 @@ func (r *InstanceRenderer) Render(i *session.Instance, idx int, selected bool, h
 		rowIcon = strings.Repeat(" ", ansi.StringWidth(rowIcon))
 	}
 
-	// A space after the branch glyph, not a hyphen: "Ꮧ-TASK-5636" reads as though
+	// A space after the branch glyph, not a hyphen: "⎇-TASK-5636" reads as though
 	// the hyphen were part of the branch name. Still two literal characters, so
 	// the width reserved for them above is unchanged.
-	branchLine := fmt.Sprintf("%s %s %s%s%s%s%s", strings.Repeat(" ", len(prefix)), rowIcon, branch, spaces, syncSegment, ciSegment, diff)
+	//
+	// The badges follow the branch rather than sitting at the far right: a line
+	// that is mostly empty with its facts jammed against the edge read as two
+	// unrelated things, and on a row whose branch echoes its title there was
+	// nothing on the left at all. The age keeps the right-hand edge.
+	branchLine := fmt.Sprintf("%s %s %s%s%s%s%s", strings.Repeat(" ", len(prefix)), rowIcon, branch, syncSegment, ciSegment, diffSegment(diff, descS.GetBackground()), spaces)
 
 	// join title and subtitle
 	text := lipgloss.JoinVertical(

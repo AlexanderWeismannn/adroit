@@ -977,13 +977,15 @@ func TestTheBranchGlyphGoesWithItsName(t *testing.T) {
 	// them sideways on whichever rows happened to have an echoed branch.
 	require.Equal(t, lipgloss.Width(named), lipgloss.Width(echoed))
 
+	// The badges follow the branch, so on the echoed row they start where the
+	// branch would have: the glyph's column stays spent, and nothing else.
 	columnOf := func(t *testing.T, out, needle string) int {
 		t.Helper()
 		line := lineContaining(t, plain(out), needle)
 		return ansi.StringWidth(line[:strings.Index(line, needle)])
 	}
-	require.Equal(t, columnOf(t, named, "-193"), columnOf(t, echoed, "-193"),
-		"the diff stats should not move when the glyph goes")
+	require.Equal(t, columnOf(t, named, branchIcon), columnOf(t, echoed, "+6.5k")-3,
+		"with no branch the stats take its place, one glyph and a space in")
 }
 
 // The badge is a notification, so it has to be silent in every state that asks

@@ -388,7 +388,9 @@ func (m *Menu) renderAt(level abbrev) string {
 		}
 		localKeyStyle, localDescStyle := keyStyle, descStyle
 		if dim {
-			localKeyStyle, localDescStyle = sepStyle, sepStyle
+			// A dim key keeps the word readable and only loses the accent: in the
+			// separator colour it vanished on a dark palette.
+			localKeyStyle = descStyle
 		}
 		if m.keyDown == k {
 			localKeyStyle = localKeyStyle.Underline(true)
