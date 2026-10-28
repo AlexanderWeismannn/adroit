@@ -458,3 +458,13 @@ func (t *TextInputOverlay) render() string {
 	}
 	return Frame(t.width, t.Title, content, footer, theme.Color(theme.Accent))
 }
+
+// typingMods are the modifiers a printable key can carry and still be typing:
+// with keyboard enhancements on, Shift+a arrives as Text "A" plus ModShift.
+const typingMods = tea.ModShift | tea.ModCapsLock | tea.ModNumLock
+
+// IsTyped reports whether msg is a printable character to insert, rather than
+// a Ctrl/Alt/Super shortcut.
+func IsTyped(msg tea.KeyPressMsg) bool {
+	return msg.Text != "" && msg.Mod&^typingMods == 0
+}

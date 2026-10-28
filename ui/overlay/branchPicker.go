@@ -91,7 +91,7 @@ func (bp *BranchPicker) HandleKeyPress(msg tea.KeyPressMsg) (consumed bool, filt
 		bp.filterVersion++
 		return true, true
 	default:
-		if msg.Text == "" || msg.Mod != 0 {
+		if !IsTyped(msg) {
 			return false, false
 		}
 		bp.filter += msg.Text

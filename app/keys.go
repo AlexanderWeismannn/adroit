@@ -142,7 +142,7 @@ func (m *home) handleKeyPress(msg tea.KeyPressMsg) (mod tea.Model, cmd tea.Cmd) 
 				return m, m.handleError(err)
 			}
 		default:
-			if msg.Text == "" || msg.Mod != 0 {
+			if !overlay.IsTyped(msg) {
 				return m, nil
 			}
 			if ansi.StringWidth(instance.Title) >= 32 {

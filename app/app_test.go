@@ -635,15 +635,26 @@ func TestTheViewIsNeverWiderThanTheTerminal(t *testing.T) {
 // also shortcuts -- n, r, t, d, x, p, c, g, o -- so without this, typing
 // "post-ai-svg" highlighted a different menu entry on nearly every keystroke and
 // re-sent each one through the update loop to get it delivered.
+//
+// Capitals arrive with the modifier that made them: a terminal with keyboard
+// enhancements reports Shift+p as Text "P" with ModShift, and Caps Lock as
+// ModCapsLock. Those are typing, not shortcuts, so they must reach the name too.
 func TestNamingKeystrokesAreNotStolenByTheMenu(t *testing.T) {
 	h := newSizedHome(t, 150, 40)
 	press := func(r rune) { _, _ = h.handleKeyPress(tea.KeyPressMsg{Code: r, Text: string(r)}) }
 	press('n')
 	press('n') // the first press only highlights the menu entry and re-sends
 
-	const name = "post-ai-svg" // p, o, t, and n are all shortcuts
-	for _, r := range name {
-		press(r)
+	const name = "Post-AI-svg" // p, o, t, and n are all shortcuts
+	for i, r := range name {
+		switch {
+		case i == 0:
+			_, _ = h.handleKeyPress(tea.KeyPressMsg{Code: 'p', ShiftedCode: r, Text: string(r), Mod: tea.ModShift})
+		case r == 'A' || r == 'I':
+			_, _ = h.handleKeyPress(tea.KeyPressMsg{Code: r + 32, Text: string(r), Mod: tea.ModCapsLock})
+		default:
+			press(r)
+		}
 	}
 
 	instances := h.list.GetInstances()
