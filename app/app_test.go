@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/AlexanderWeismannn/adroit/config"
 	"github.com/AlexanderWeismannn/adroit/log"
@@ -993,6 +994,25 @@ func TestAttentionEventFiresOnTheTransitionOnly(t *testing.T) {
 	require.Equal(t, "", step(session.ActivityWorking), "answering it is not an event")
 	require.Equal(t, "finished", step(session.ActivityIdle))
 	require.Equal(t, "", step(session.ActivityIdle), "still idle is not a second event")
+}
+
+// A pull request announces a new remark or approval once, when a lookup first
+// sees it -- and never on the first lookup, which would ring for every remark
+// already sitting on every pull request each time Adroit starts.
+func TestPREventFiresOnANewRemarkOrApprovalOnly(t *testing.T) {
+	t0 := time.Now()
+	open := ci.Status{State: ci.StatePending, PRNumber: 7, FetchedAt: t0}
+	with := func(s ci.Status, f func(*ci.Status)) ci.Status { f(&s); return s }
+	remark := with(open, func(s *ci.Status) { s.LastRemarkAt = t0; s.Feedback = ci.FeedbackOutstanding })
+
+	require.Equal(t, "", prEvent(ci.Status{}, remark), "the first lookup is not news")
+	require.Equal(t, "pr-comment", prEvent(open, remark))
+	require.Equal(t, "", prEvent(remark, remark), "the same remark again is not a second event")
+	require.Equal(t, "", prEvent(open, with(remark, func(s *ci.Status) { s.Feedback = ci.FeedbackAddressed })),
+		"a remark the branch has already moved past is not waiting on you")
+	require.Equal(t, "pr-changes-requested", prEvent(open, with(remark, func(s *ci.Status) { s.Review = ci.ReviewChangesRequested })))
+	require.Equal(t, "pr-approved", prEvent(open, with(open, func(s *ci.Status) { s.Review = ci.ReviewApproved })))
+	require.Equal(t, "", prEvent(open, with(remark, func(s *ci.Status) { s.PRNumber = 8 })), "a different pull request is a first lookup")
 }
 
 func TestOrphanedWorktreesIgnoresTheOnesSessionsOwn(t *testing.T) {

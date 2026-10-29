@@ -611,6 +611,14 @@ func feedbackMarker(status ci.Status) (icon string, style lipgloss.Style) {
 	}
 }
 
+// hasOutstandingFeedback reports whether an open pull request carries a remark
+// newer than its branch's last commit. A merged or closed one never does: its
+// badge carries no feedback marker either.
+func hasOutstandingFeedback(status ci.Status) bool {
+	return status.Feedback == ci.FeedbackOutstanding &&
+		status.State != ci.StateMerged && status.State != ci.StateClosed
+}
+
 // syncBadge renders how far a session's branch has drifted from its remote
 // counterpart, plain for width accounting and styled for display -- the same
 // contract as ciBadge, and the same requirement that the two stay in step.
@@ -1530,8 +1538,13 @@ func (l *List) wantsAttention(idx int) int {
 // you, so the answer to "does anything need me?" does not take reading every
 // row. Only the states that exist are listed; a list with none says nothing.
 func (l *List) attentionSummary() string {
-	var input, unseen, working int
+	var input, unseen, working, remarks int
 	for idx, inst := range l.items {
+		// Counted apart from the switch below: a pull request waiting on your
+		// answer is independent of what the agent in its session is doing.
+		if inst.Status != session.Paused && hasOutstandingFeedback(inst.GetCIStatus()) {
+			remarks++
+		}
 		switch l.wantsAttention(idx) {
 		case 2:
 			input++
@@ -1554,6 +1567,9 @@ func (l *List) attentionSummary() string {
 	}
 	if unseen > 0 {
 		parts = append(parts, unseenStyle.Render(fmt.Sprintf("%s%d new", unseenIcon, unseen)))
+	}
+	if remarks > 0 {
+		parts = append(parts, ciPendingStyle.Render(fmt.Sprintf("%s %d PR feedback", ciCommentIcon, remarks)))
 	}
 	if working > 0 {
 		parts = append(parts, workingStyle.Render(fmt.Sprintf("%s %d working", spinnerLegendFrame, working)))

@@ -89,6 +89,10 @@ type Status struct {
 	// Feedback is whether anyone has left remarks, and whether they are newer
 	// than the branch's last commit.
 	Feedback Feedback
+	// LastRemarkAt is when the most recent remark by someone other than the
+	// pull request's author landed; zero when there is none. The app compares it
+	// across lookups to announce a remark the moment it arrives.
+	LastRemarkAt time.Time
 	// FetchedAt is when the most recent lookup attempt completed. The zero value
 	// means no attempt has completed yet.
 	FetchedAt time.Time
@@ -283,19 +287,27 @@ const (
 	FeedbackOutstanding
 )
 
-// reviewEntry is the subset of a review that says what it was and when.
+// author is who wrote a pull request, review or comment.
+type author struct {
+	Login string `json:"login"`
+}
+
+// reviewEntry is the subset of a review that says who, what and when.
 type reviewEntry struct {
+	Author      author    `json:"author"`
 	State       string    `json:"state"`
 	SubmittedAt time.Time `json:"submittedAt"`
 }
 
-// commentEntry is the subset of a conversation comment that says when.
+// commentEntry is the subset of a conversation comment that says who and when.
 type commentEntry struct {
+	Author    author    `json:"author"`
 	CreatedAt time.Time `json:"createdAt"`
 }
 
 type prView struct {
 	Number            int           `json:"number"`
+	Author            author        `json:"author"`
 	State             string        `json:"state"`
 	Mergeable         string        `json:"mergeable"`
 	ReviewDecision    string        `json:"reviewDecision"`
@@ -313,10 +325,12 @@ type prView struct {
 //
 // An approval is not feedback: it is already carried by ReviewState's own marker,
 // and counting it would light the comment marker on every approved pull request.
+// Nor is anything the pull request's author wrote: a reply to a reviewer, or an
+// "@bot review" nudge, is you talking, and must not announce itself back to you.
 func (v prView) lastRemark() (time.Time, bool) {
 	var latest time.Time
 	for _, r := range v.LatestReviews {
-		if strings.EqualFold(r.State, "APPROVED") {
+		if strings.EqualFold(r.State, "APPROVED") || v.byAuthor(r.Author) {
 			continue
 		}
 		if r.SubmittedAt.After(latest) {
@@ -324,11 +338,21 @@ func (v prView) lastRemark() (time.Time, bool) {
 		}
 	}
 	for _, c := range v.Comments {
+		if v.byAuthor(c.Author) {
+			continue
+		}
 		if c.CreatedAt.After(latest) {
 			latest = c.CreatedAt
 		}
 	}
 	return latest, !latest.IsZero()
+}
+
+// byAuthor reports whether a remark was written by the pull request's author.
+// An unknown author on either side is not a match, so a response without the
+// field still counts every remark.
+func (v prView) byAuthor(a author) bool {
+	return v.Author.Login != "" && strings.EqualFold(a.Login, v.Author.Login)
 }
 
 // fetch runs gh in repoPath and classifies the result.
@@ -337,7 +361,7 @@ func fetch(repoPath, branch string, headTime time.Time) (Status, error) {
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, ghPath, "pr", "view", branch,
-		"--json", "number,state,mergeable,reviewDecision,statusCheckRollup,latestReviews,comments")
+		"--json", "number,author,state,mergeable,reviewDecision,statusCheckRollup,latestReviews,comments")
 	// Run inside the repo so gh resolves the remote itself; this also means a
 	// fork or a non-github remote simply yields an error we swallow.
 	cmd.Dir = repoPath
@@ -373,6 +397,7 @@ func fetch(repoPath, branch string, headTime time.Time) (Status, error) {
 	status.Mergeable = mergeability(view.Mergeable)
 	status.Review = reviewState(view.ReviewDecision)
 	status.Feedback = feedbackState(view, headTime)
+	status.LastRemarkAt, _ = view.lastRemark()
 	status.FetchedAt = time.Now()
 	return status, nil
 }

@@ -7,6 +7,7 @@ import (
 
 	"github.com/AlexanderWeismannn/adroit/log"
 	"github.com/AlexanderWeismannn/adroit/session"
+	"github.com/AlexanderWeismannn/adroit/session/ci"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -21,6 +22,26 @@ func attentionEvent(inst *session.Instance, before session.Activity, wasDone tim
 		return "needs-input"
 	case wasDone.IsZero() && !inst.DoneAt().IsZero():
 		return "finished"
+	}
+	return ""
+}
+
+// prEvent names what changed on a session's pull request between two lookups
+// that wants you, or "" if nothing did: a new remark from someone else, or a
+// new approval. A first lookup (before.FetchedAt zero) announces nothing, so
+// starting Adroit does not ring for every remark already on every pull request.
+func prEvent(before, after ci.Status) string {
+	if before.FetchedAt.IsZero() || after.FetchedAt.IsZero() || before.PRNumber != after.PRNumber {
+		return ""
+	}
+	switch {
+	case after.LastRemarkAt.After(before.LastRemarkAt) && after.Feedback == ci.FeedbackOutstanding:
+		if after.Review == ci.ReviewChangesRequested && before.Review != ci.ReviewChangesRequested {
+			return "pr-changes-requested"
+		}
+		return "pr-comment"
+	case after.Review == ci.ReviewApproved && before.Review != ci.ReviewApproved:
+		return "pr-approved"
 	}
 	return ""
 }

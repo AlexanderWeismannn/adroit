@@ -1352,6 +1352,11 @@ func TestSelectNextAttentionPrefersAQuestion(t *testing.T) {
 	require.False(t, l.SelectNextAttention(), "both are dealt with: the finish was seen on arrival")
 	require.NotContains(t, l.attentionSummary(), "waiting")
 	require.NotContains(t, l.attentionSummary(), "new")
+
+	insts[0].SetCIStatus(ci.Status{State: ci.StatePending, PRNumber: 1, Feedback: ci.FeedbackOutstanding})
+	require.Contains(t, l.attentionSummary(), "1 PR feedback", "a remark waiting on you is counted in the header")
+	insts[0].SetCIStatus(ci.Status{State: ci.StateMerged, PRNumber: 1, Feedback: ci.FeedbackOutstanding})
+	require.NotContains(t, l.attentionSummary(), "PR feedback", "a merged pull request is not waiting on you")
 }
 
 // A row is un-counted from its repository only if it was counted: a naming that

@@ -503,6 +503,9 @@ func (m *home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					r.instance.MarkUntrackedStaged()
 				}
 			}
+			if event := prEvent(r.instance.GetCIStatus(), r.ciStatus); event != "" {
+				events = append(events, attention{title: r.instance.Title, event: event})
+			}
 			r.instance.SetCIStatus(r.ciStatus)
 			r.instance.SetUpstreamStatus(r.upstream)
 			if r.branchResolved {

@@ -161,8 +161,8 @@ type Config struct {
 	Mouse *bool `json:"mouse,omitempty"`
 	// NotifyCommand, when set, is run through `sh -c` on the same events, for a
 	// desktop notification the bell cannot give. It gets ADROIT_SESSION (the
-	// session's title) and ADROIT_EVENT ("finished" or "needs-input") in its
-	// environment. Its output is discarded and it is not waited on.
+	// session's title) and ADROIT_EVENT ("finished", "needs-input",
+	// "pr-comment", "pr-changes-requested" or "pr-approved") in its environment. Its output is discarded and it is not waited on.
 	NotifyCommand string `json:"notify_command,omitempty"`
 	// Dev describes the development stack a session can run, for any repository
 	// with no entry of its own in Repos. Nil disables the feature: there is
