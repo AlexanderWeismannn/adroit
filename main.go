@@ -61,6 +61,16 @@ var (
 				return fmt.Errorf("error: %s must be run from within a git repository", binName)
 			}
 
+			// Before the lock and before any client is opened: running inside a
+			// session Adroit manages makes it attach a client to its own window.
+			if host := tmux.HostManagedSession(); host != "" {
+				return fmt.Errorf(
+					"%s is running inside its own session %q.\n\n"+
+						"It would attach to the window it draws in, and the screen would flicker and resize\n"+
+						"without end. Switch out first (`tmux switch-client -t main`, or start a new\n"+
+						"terminal outside tmux) and run %s there", binName, host, binName)
+			}
+
 			// Before the lock: taking it creates the config directory.
 			if err := checkLegacyState(skipLegacyFlag); err != nil {
 				return err
