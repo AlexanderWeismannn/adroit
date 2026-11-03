@@ -122,6 +122,24 @@ var (
 		SelectionFg: {Light: "#003b00", Dark: "#00ff41"},
 	}
 
+	// slate is the revamp's own palette: the one the design mockups were drawn
+	// in. A steel-blue accent on a blue-black ground, with the greens, ambers
+	// and reds kept soft so the state glyphs read without shouting.
+	slate = Palette{
+		Accent:      {Light: "#2f6db5", Dark: "#8fb5e0"},
+		AccentText:  {Light: "#f6f4ef", Dark: "#14171c"},
+		Success:     {Light: "#2f8f4e", Dark: "#86c28b"},
+		Danger:      {Light: "#c23b45", Dark: "#e06c75"},
+		Warning:     {Light: "#b7791f", Dark: "#e3b35a"},
+		Info:        {Light: "#2f6db5", Dark: "#8fb5e0"},
+		Special:     {Light: "#7a5cc2", Dark: "#b8a3e8"},
+		Text:        {Light: "#2a2d33", Dark: "#d7dce2"},
+		Muted:       {Light: "#8a8f99", Dark: "#6b7482"},
+		Subtle:      {Light: "#cfcbc2", Dark: "#3a414c"},
+		SelectionBg: {Light: "#e6e2d8", Dark: "#232a35"},
+		SelectionFg: {Light: "#2a2d33", Dark: "#e8eaf0"},
+	}
+
 	// mono uses the terminal's own 0-255 palette, so it inherits whatever colour
 	// scheme the terminal is already set to instead of imposing one.
 	mono = Palette{
@@ -148,6 +166,7 @@ var builtins = map[string]Palette{
 	"gruvbox":    gruvbox,
 	"catppuccin": catppuccin,
 	"solarized":  solarized,
+	"slate":      slate,
 	"matrix":     matrix,
 	"mono":       mono,
 }

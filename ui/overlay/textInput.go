@@ -1,13 +1,14 @@
 package overlay
 
 import (
-	"github.com/AlexanderWeismannn/adroit/config"
-	"github.com/AlexanderWeismannn/adroit/theme"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textarea"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"github.com/AlexanderWeismannn/adroit/config"
+	"github.com/AlexanderWeismannn/adroit/theme"
+
+	"charm.land/bubbles/v2/textarea"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 var (
@@ -111,7 +112,9 @@ func newTextarea(initialValue string) textarea.Model {
 	ti.Focus()
 	ti.ShowLineNumbers = false
 	ti.Prompt = ""
-	ti.FocusedStyle.CursorLine = lipgloss.NewStyle()
+	styles := ti.Styles()
+	styles.Focused.CursorLine = lipgloss.NewStyle()
+	ti.SetStyles(styles)
 	ti.CharLimit = 0
 	ti.MaxHeight = 0
 	return ti
@@ -215,7 +218,7 @@ func (t *TextInputOverlay) updateFocusState() {
 
 // HandleKeyPress processes a key press and updates the state accordingly.
 // Returns (shouldClose, branchFilterChanged).
-func (t *TextInputOverlay) HandleKeyPress(msg tea.KeyMsg) (bool, bool) {
+func (t *TextInputOverlay) HandleKeyPress(msg tea.KeyPressMsg) (bool, bool) {
 	// Any key is an attempt to fix whatever was wrong, so the message clears as
 	// soon as one arrives rather than sitting there through the correction.
 	t.errMsg = ""
@@ -224,7 +227,7 @@ func (t *TextInputOverlay) HandleKeyPress(msg tea.KeyMsg) (bool, bool) {
 	// it is a newline and in the branch picker it chooses, so sending took tab,
 	// tab, enter -- while the menu said "enter confirm". alt+enter too, where the
 	// terminal delivers it.
-	if msg.Type == tea.KeyCtrlS || (msg.Type == tea.KeyEnter && msg.Alt) {
+	if msg.String() == "ctrl+s" || msg.String() == "alt+enter" {
 		t.Submitted = true
 		if t.OnSubmit != nil {
 			t.OnSubmit()
@@ -232,7 +235,17 @@ func (t *TextInputOverlay) HandleKeyPress(msg tea.KeyMsg) (bool, bool) {
 		return true, false
 	}
 
-	switch msg.Type {
+	// shift+tab before the switch: its code is tab's, and the modifier is what
+	// tells them apart.
+	if msg.String() == "shift+tab" {
+		if t.isBranchPicker() && t.branchPicker.MoveUp() {
+			return false, false
+		}
+		t.setFocusIndex((t.FocusIndex - 1 + t.numStops) % t.numStops)
+		return false, false
+	}
+
+	switch msg.Code {
 	case tea.KeyTab:
 		// In the picker, tab steps down the options and leaves only from the
 		// last. Tab is how the picker is reached from the name prompt, so it is
@@ -243,13 +256,9 @@ func (t *TextInputOverlay) HandleKeyPress(msg tea.KeyMsg) (bool, bool) {
 		}
 		t.setFocusIndex((t.FocusIndex + 1) % t.numStops)
 		return false, false
-	case tea.KeyShiftTab:
-		if t.isBranchPicker() && t.branchPicker.MoveUp() {
-			return false, false
-		}
-		t.setFocusIndex((t.FocusIndex - 1 + t.numStops) % t.numStops)
-		return false, false
-	case tea.KeyEsc:
+	}
+	switch msg.Code {
+	case tea.KeyEscape:
 		t.Canceled = true
 		return true, false
 	case tea.KeyEnter:
@@ -281,7 +290,7 @@ func (t *TextInputOverlay) HandleKeyPress(msg tea.KeyMsg) (bool, bool) {
 			return false, false
 		}
 		if t.isProfilePicker() {
-			if msg.Type == tea.KeyLeft || msg.Type == tea.KeyRight {
+			if msg.Code == tea.KeyLeft || msg.Code == tea.KeyRight {
 				t.profilePicker.HandleKeyPress(msg)
 			}
 			return false, false
@@ -420,12 +429,6 @@ func (t *TextInputOverlay) render() string {
 	//
 	// The title's own bottom margin is dropped and the blank line written here
 	// instead, or the hint lands below the margin rather than next to the title.
-	title := tiTitleStyle.UnsetMarginBottom().Render(t.Title)
-	if t.numStops > 2 {
-		title = lipgloss.JoinHorizontal(lipgloss.Bottom, title,
-			tiHintStyle.Render("   tab: next field · esc: cancel"))
-	}
-	content += title + "\n\n"
 	content += t.textarea.View() + "\n\n"
 
 	// Render branch picker if present, with dividers
@@ -449,5 +452,19 @@ func (t *TextInputOverlay) render() string {
 	}
 	content += enterButton
 
-	return tiStyle.Render(content)
+	footer := Keys(Key{"ctrl+s", "submit"}, Key{"esc", "cancel"})
+	if t.numStops > 2 {
+		footer = Keys(Key{"tab", "next field"}, Key{"ctrl+s", "submit"}, Key{"esc", "cancel"})
+	}
+	return Frame(t.width, t.Title, content, footer, theme.Color(theme.Accent))
+}
+
+// typingMods are the modifiers a printable key can carry and still be typing:
+// with keyboard enhancements on, Shift+a arrives as Text "A" plus ModShift.
+const typingMods = tea.ModShift | tea.ModCapsLock | tea.ModNumLock
+
+// IsTyped reports whether msg is a printable character to insert, rather than
+// a Ctrl/Alt/Super shortcut.
+func IsTyped(msg tea.KeyPressMsg) bool {
+	return msg.Text != "" && msg.Mod&^typingMods == 0
 }

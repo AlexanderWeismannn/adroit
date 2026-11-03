@@ -2,13 +2,14 @@ package ui
 
 import (
 	"fmt"
-	"github.com/AlexanderWeismannn/adroit/session"
-	"github.com/AlexanderWeismannn/adroit/theme"
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/viewport"
-	"github.com/charmbracelet/lipgloss"
+	"github.com/AlexanderWeismannn/adroit/session"
+	"github.com/AlexanderWeismannn/adroit/theme"
+
+	"charm.land/bubbles/v2/viewport"
+	"charm.land/lipgloss/v2"
 )
 
 var (
@@ -41,7 +42,7 @@ type DiffPane struct {
 
 func NewDiffPane() *DiffPane {
 	return &DiffPane{
-		viewport: viewport.New(0, 0),
+		viewport: viewport.New(),
 	}
 }
 
@@ -49,8 +50,8 @@ func (d *DiffPane) SetSize(width, height int) {
 	width, height = max(width, 0), max(height, 0)
 	d.width = width
 	d.height = height
-	d.viewport.Width = width
-	d.viewport.Height = height
+	d.viewport.SetWidth(width)
+	d.viewport.SetHeight(height)
 	// Update viewport content if diff exists
 	if d.diff != "" || d.stats != "" {
 		d.viewport.SetContent(d.content())
@@ -135,17 +136,17 @@ func (d *DiffPane) String() string {
 // IsScrolling reports whether the diff is scrolled away from its top. The diff
 // has no live mode to pause, so this is only a position.
 func (d *DiffPane) IsScrolling() bool {
-	return d.viewport.YOffset > 0
+	return d.viewport.YOffset() > 0
 }
 
 // ScrollUp scrolls the viewport up
 func (d *DiffPane) ScrollUp() {
-	d.viewport.LineUp(1)
+	d.viewport.ScrollUp(1)
 }
 
 // ScrollDown scrolls the viewport down
 func (d *DiffPane) ScrollDown() {
-	d.viewport.LineDown(1)
+	d.viewport.ScrollDown(1)
 }
 
 // colorizeDiff styles a unified diff for the pane, and returns it with the

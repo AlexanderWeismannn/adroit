@@ -3,9 +3,10 @@
 package tmux
 
 import (
-	"github.com/AlexanderWeismannn/adroit/log"
 	"os"
 	"time"
+
+	"github.com/AlexanderWeismannn/adroit/log"
 
 	"golang.org/x/term"
 )

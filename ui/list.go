@@ -3,6 +3,11 @@ package ui
 import (
 	"errors"
 	"fmt"
+	"image/color"
+	"path/filepath"
+	"strings"
+	"time"
+
 	"github.com/AlexanderWeismannn/adroit/log"
 	"github.com/AlexanderWeismannn/adroit/session"
 	"github.com/AlexanderWeismannn/adroit/session/ci"
@@ -10,17 +15,21 @@ import (
 	"github.com/AlexanderWeismannn/adroit/session/git"
 	"github.com/AlexanderWeismannn/adroit/session/upstream"
 	"github.com/AlexanderWeismannn/adroit/theme"
-	"path/filepath"
-	"strings"
-	"time"
 
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/mattn/go-runewidth"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
+// The state glyph is the first column of every row, one cell wide, so the
+// column reads by silhouette from top to bottom: what is live, what is waiting
+// on you, what is parked.
 const readyIcon = "● "
-const pausedIcon = "⏸ "
+const pausedIcon = "○ "
+
+// notStartedIcon is a session that has not run yet, or has nothing left to do
+// (its pull request is merged or closed).
+const notStartedIcon = "· "
 
 // doneChip is the mark a session wears for the few seconds after it finishes.
 //
@@ -29,14 +38,15 @@ const pausedIcon = "⏸ "
 // also carries added lines and passing builds -- and a foreground bright enough
 // to read as "just finished" against one theme's paper is illegible against
 // another's. Reverse video is vibrant on every palette there is, and needs no
-// new role.
-const doneChip = " ✓ done "
+// new role. A fisheye rather than the check the unseen mark wears, so the two
+// moments of a finish stay distinguishable in text as well as in colour.
+const doneChip = "◉ "
 
-// needsInputChip is the mark of a session stopped on a question for you. A chip,
-// like doneChip, because this is the one state that stays until you act on it:
-// a glyph in the status column is what a quiet list is made of, and this has to
-// stand out of one. Warning rather than Success, since it is not finished.
-const needsInputChip = " ? input "
+// needsInputChip is the mark of a session stopped on a question for you. The
+// one state that stays until you act on it, so it is bold and in the warning
+// colour: a glyph in the status column is what a quiet list is made of, and
+// this has to stand out of one.
+const needsInputChip = "? "
 
 // unseenIcon is a finished turn you have not looked at yet, once the chip has
 // had its moment. Kept until the cursor lands on the row, so coming back to the
@@ -134,16 +144,14 @@ var needsInputChipStyle, unseenStyle lipgloss.Style
 // The selected row's colours are their own pair of roles rather than a shade of
 // the accent: they have to contrast with each other, which no single hue can
 // guarantee across every theme.
-var selectedBg, selectedFg, selectionAccent lipgloss.TerminalColor
-
-var accentBorder = lipgloss.Border{Left: "▌"}
+var selectedBg, selectedFg, selectionAccent color.Color
 
 // Left padding drops to 0 where the border is added, so the bar occupies the
 // column the padding used to and the row's total width is unchanged — the
 // unselected styles keep their padding and the two stay aligned.
 var selectedTitleStyle, selectedDescStyle lipgloss.Style
 
-var mainTitle, autoYesStyle lipgloss.Style
+var mainTitle, autoYesStyle, listRuleStyle, listUnfocusedRuleStyle, listLabelStyle lipgloss.Style
 
 // Styles hold a copy of their colour, so a theme change has to rebuild them
 // rather than be re-read. Registered here so a package added later cannot be
@@ -181,32 +189,29 @@ func applyListTheme() {
 	// space rather than jammed against its edges. Tried at two rows and at
 	// three: the list fits more sessions and reads worse, and how many rows are
 	// on screen is not what makes the list legible.
-	titleStyle = lipgloss.NewStyle().
-		Padding(1, 1, 0, 1).
-		Foreground(theme.Color(theme.Text))
-	listDescStyle = lipgloss.NewStyle().
-		Padding(0, 1, 1, 1).
-		Foreground(theme.Color(theme.Muted))
+	// Two rows per session, no padding rows: the row is its title line and its
+	// branch line, and the list puts one blank row between sessions. The
+	// selected row is a band of the selection colour across both lines with the
+	// title in bold -- a band rather than a bar down the left, so the glyph
+	// column stays a column.
+	titleStyle = lipgloss.NewStyle().Foreground(theme.Color(theme.Text))
+	listDescStyle = lipgloss.NewStyle().Foreground(theme.Color(theme.Muted))
 
 	selectedBg = theme.Color(theme.SelectionBg)
 	selectedFg = theme.Color(theme.SelectionFg)
 	selectionAccent = theme.Color(theme.Accent)
 
 	selectedTitleStyle = lipgloss.NewStyle().
-		Padding(1, 1, 0, 0).
-		Border(accentBorder, false, false, false, true).
-		BorderForeground(selectionAccent).
-		BorderBackground(selectedBg).
+		Bold(true).
 		Background(selectedBg).
 		Foreground(selectedFg)
 	selectedDescStyle = lipgloss.NewStyle().
-		Padding(0, 1, 1, 0).
-		Border(accentBorder, false, false, false, true).
-		BorderForeground(selectionAccent).
-		BorderBackground(selectedBg).
 		Background(selectedBg).
 		Foreground(selectedFg)
 
+	listRuleStyle = lipgloss.NewStyle().Foreground(theme.Color(theme.Accent))
+	listUnfocusedRuleStyle = lipgloss.NewStyle().Foreground(theme.Color(theme.Muted))
+	listLabelStyle = lipgloss.NewStyle().Foreground(theme.Color(theme.Muted))
 	mainTitle = lipgloss.NewStyle().
 		Background(theme.Color(theme.Accent)).
 		Foreground(theme.Color(theme.AccentText))
@@ -229,6 +234,15 @@ type List struct {
 	naming        bool
 	branchPreview string
 	autoyes       bool
+	// focused is whether the list owns the keyboard, which its border shows.
+	focused bool
+	// compact draws one line per session, for the mode where the list has the
+	// whole width and the window is behind it.
+	compact bool
+	// rowAt maps each row inside the box, top to bottom, to the session drawn
+	// on it (-1 for a blank or a scroll marker), as of the last render. It is
+	// what a click is resolved against.
+	rowAt []int
 
 	// map of repo name to number of instances using it. Used to display the repo name only if there are
 	// multiple repos in play.
@@ -246,15 +260,23 @@ func NewList(spinner *spinner.Model, autoYes bool) *List {
 		repos:    make(map[string]int),
 		repoOf:   make(map[*session.Instance]string),
 		autoyes:  autoYes,
+		focused:  true,
 	}
 }
+
+// SetFocused records whether the list owns the keyboard.
+func (l *List) SetFocused(focused bool) { l.focused = focused }
+
+// SetCompact switches between two-line rows and one-line ones.
+func (l *List) SetCompact(compact bool) { l.compact = compact }
 
 // SetSize sets the height and width of the list.
 func (l *List) SetSize(width, height int) {
 	width, height = max(width, 0), max(height, 0)
 	l.width = width
 	l.height = height
-	l.renderer.setWidth(width)
+	// The rows live inside the box's border.
+	l.renderer.setWidth(max(width-2, 0))
 }
 
 // SetSessionPreviewSize sets the height and width for the tmux sessions. This makes the stdout line have the correct
@@ -296,6 +318,25 @@ func (l *List) SetDevStack(title string, state dev.LampState) {
 	l.renderer.devStackState = state
 }
 
+// SetBusy marks a row as having an action in flight, with the word for it, and
+// ClearBusy takes the mark off once the action has come back.
+func (l *List) SetBusy(instance *session.Instance, doing string) {
+	if l.renderer.busy == nil {
+		l.renderer.busy = map[*session.Instance]string{}
+	}
+	l.renderer.busy[instance] = doing
+}
+
+func (l *List) ClearBusy(instance *session.Instance) {
+	delete(l.renderer.busy, instance)
+}
+
+// Busy reports whether any row has an action in flight, which is when the
+// animation has to be running.
+func (l *List) Busy() bool {
+	return len(l.renderer.busy) > 0
+}
+
 func (l *List) NumInstances() int {
 	return len(l.items)
 }
@@ -325,6 +366,13 @@ type InstanceRenderer struct {
 	spinner *spinner.Model
 	width   int
 
+	// busy is the rows an action is running on off the loop, and what the
+	// action is: "checking out", "resuming". The row spins and says so from the
+	// keypress, not from the moment the work comes back. Without it a checkout
+	// of a large worktree was seconds of nothing happening on a key that
+	// usually does something at once.
+	busy map[*session.Instance]string
+
 	// now is the clock the just-finished window is measured against. Injectable
 	// so a test can place a row inside or outside the window without sleeping
 	// through it.
@@ -338,8 +386,10 @@ func (r *InstanceRenderer) clock() time.Time {
 	return r.now()
 }
 
+// setWidth gives the rows the box's whole inner width: the row's own leading
+// and trailing cell are its air.
 func (r *InstanceRenderer) setWidth(width int) {
-	r.width = AdjustPreviewWidth(width)
+	r.width = width
 }
 
 // ɹ and ɻ are other options.
@@ -371,7 +421,7 @@ var namingPlaceholderStyle, namingCursorStyle, ageStyle lipgloss.Style
 // in a reset, so everything after it -- including that padding -- falls back to
 // the terminal's own background: a dark bar running from the styled span to the
 // end of an otherwise highlighted row.
-func padTo(s string, width int, bg lipgloss.TerminalColor) string {
+func padTo(s string, width int, bg color.Color) string {
 	pad := width - lipgloss.Width(s)
 	if pad <= 0 {
 		return s
@@ -379,7 +429,10 @@ func padTo(s string, width int, bg lipgloss.TerminalColor) string {
 	return s + lipgloss.NewStyle().Background(bg).Render(strings.Repeat(" ", pad))
 }
 
-const branchIcon = "Ꮧ"
+// branchIcon marks a branch in its own worktree. U+2387 draws two cells wide in
+// Windows Terminal while tmux counts one; the space that always follows it
+// absorbs the spill, so nothing may ever be drawn directly after it.
+const branchIcon = "⎇"
 
 // repoIcon marks a session running in the repository itself rather than in a
 // worktree of its own. A distinct shape because the line means something
@@ -401,7 +454,7 @@ const minBranchWidth = 6
 // permanently squeezed, and a session on branch "zebra" silently lost its build
 // verdict and its remote counts on a pane with sixty columns to spare.
 func branchSquashed(branch string, column int) bool {
-	need := runewidth.StringWidth(branch)
+	need := ansi.StringWidth(branch)
 	if need > minBranchWidth {
 		need = minBranchWidth
 	}
@@ -411,7 +464,7 @@ func branchSquashed(branch string, column int) bool {
 // visibleBranchWidth reports how many characters of a branch name survive in a
 // column of the given width, mirroring the truncation Render applies below.
 func visibleBranchWidth(branch string, column int) int {
-	width := runewidth.StringWidth(branch)
+	width := ansi.StringWidth(branch)
 	switch {
 	case column >= width:
 		return width
@@ -460,7 +513,7 @@ func prMarker(status ci.Status) (icon, label string, style lipgloss.Style) {
 // The two halves must stay in step: plain is what the caller subtracts from the
 // branch name's width budget, so any span added to styled has to be added to
 // plain too, or the row overflows its pane.
-func ciBadge(status ci.Status, bg lipgloss.TerminalColor, labelled bool) (plain, styled string) {
+func ciBadge(status ci.Status, bg color.Color, labelled bool) (plain, styled string) {
 	if labelled {
 		return ciBadgeAt(status, bg, badgeWordsAll)
 	}
@@ -478,7 +531,7 @@ const (
 	badgeWordsAll     = 3 // and "comments"
 )
 
-func ciBadgeAt(status ci.Status, bg lipgloss.TerminalColor, words int) (plain, styled string) {
+func ciBadgeAt(status ci.Status, bg color.Color, words int) (plain, styled string) {
 	var icon, label string
 	var style lipgloss.Style
 
@@ -558,6 +611,14 @@ func feedbackMarker(status ci.Status) (icon string, style lipgloss.Style) {
 	}
 }
 
+// hasOutstandingFeedback reports whether an open pull request carries a remark
+// newer than its branch's last commit. A merged or closed one never does: its
+// badge carries no feedback marker either.
+func hasOutstandingFeedback(status ci.Status) bool {
+	return status.Feedback == ci.FeedbackOutstanding &&
+		status.State != ci.StateMerged && status.State != ci.StateClosed
+}
+
 // syncBadge renders how far a session's branch has drifted from its remote
 // counterpart, plain for width accounting and styled for display -- the same
 // contract as ciBadge, and the same requirement that the two stay in step.
@@ -570,7 +631,7 @@ func feedbackMarker(status ci.Status) (icon string, style lipgloss.Style) {
 // the code on screen is not the code on the branch. Ahead alone is dim: it is
 // the normal condition of a session mid-task, and colouring it would nag about
 // every unpushed commit.
-func syncBadge(status upstream.Status, bg lipgloss.TerminalColor, labelled bool) (plain, styled string) {
+func syncBadge(status upstream.Status, bg color.Color, labelled bool) (plain, styled string) {
 	label := func(text, word string) string {
 		if labelled {
 			return text + " " + word
@@ -628,33 +689,33 @@ const elision = "…"
 // counting characters. The head places the name, the tail says which one it is,
 // and both survive this.
 func elideMiddle(s string, width int) string {
-	full := runewidth.StringWidth(s)
+	full := ansi.StringWidth(s)
 	if width <= 0 {
 		return ""
 	}
 	if full <= width {
 		return s
 	}
-	mark := runewidth.StringWidth(elision)
+	mark := ansi.StringWidth(elision)
 	if width <= mark {
-		return runewidth.Truncate(s, width, "")
+		return ansi.Truncate(s, width, "")
 	}
 	// The head keeps the odd column: a name is read from the front, and with two
 	// characters to give away the first is worth more than the last.
 	room := width - mark
 	for tail := room / 2; tail >= 0; tail-- {
-		out := runewidth.Truncate(s, room-tail, "") + elision
+		out := ansi.Truncate(s, room-tail, "") + elision
 		if tail > 0 {
-			out += runewidth.TruncateLeft(s, full-tail, "")
+			out += ansi.TruncateLeft(s, full-tail, "")
 		}
 		// A double-width rune straddling either cut can overshoot the budget by a
 		// column. Give the tail back a character rather than the whole row a
 		// misaligned edge.
-		if runewidth.StringWidth(out) <= width {
+		if ansi.StringWidth(out) <= width {
 			return out
 		}
 	}
-	return runewidth.Truncate(s, width, "")
+	return ansi.Truncate(s, width, "")
 }
 
 // shortAge renders how long a session has been quiet, in the fewest characters
@@ -679,7 +740,7 @@ func shortAge(d time.Duration) string {
 //
 // Only on a row that has stopped. A spinning row is saying "now" already, and
 // the number would be a second stale by the time it was read.
-func (r *InstanceRenderer) rowAge(i *session.Instance, beingNamed bool, bg lipgloss.TerminalColor) (string, int) {
+func (r *InstanceRenderer) rowAge(i *session.Instance, beingNamed bool, bg color.Color) (string, int) {
 	if beingNamed || i.Status == session.Loading || i.Status == session.Running {
 		return "", 0
 	}
@@ -696,13 +757,13 @@ func (r *InstanceRenderer) rowAge(i *session.Instance, beingNamed bool, bg lipgl
 		return "", 0
 	}
 	age = " " + age
-	return ageStyle.Background(bg).Render(age), runewidth.StringWidth(age)
+	return ageStyle.Background(bg).Render(age), ansi.StringWidth(age)
 }
 
 // devBadge renders the development-stack mark for a row, and the width it costs.
 // The width is returned separately because the styled string carries ANSI codes
 // that runewidth would count as printable.
-func (r *InstanceRenderer) devBadge(i *session.Instance, bg lipgloss.TerminalColor) (string, int) {
+func (r *InstanceRenderer) devBadge(i *session.Instance, bg color.Color) (string, int) {
 	if r.devStackTitle == "" || r.devStackTitle != i.Title {
 		return "", 0
 	}
@@ -715,36 +776,37 @@ func (r *InstanceRenderer) devBadge(i *session.Instance, bg lipgloss.TerminalCol
 	case dev.LampDown:
 		style, glyph = removedLinesStyle, lampDownGlyph
 	}
-	return style.Background(bg).Render(glyph), runewidth.StringWidth(glyph)
+	return style.Background(bg).Render(glyph), ansi.StringWidth(glyph)
 }
 
-// statusMark is the glyph at the right-hand end of a row's title, and the width
-// the row has to reserve for it.
-//
-// The width comes back with the string rather than being measured by the caller,
-// because the mark is not always one glyph: the just-finished chip is a word, and
-// like the dev-stack mark it takes its room out of the title's column so that a
-// marked row stays exactly as wide as an unmarked one.
-func (r *InstanceRenderer) statusMark(i *session.Instance, beingNamed, selected bool, bg lipgloss.TerminalColor) (string, int) {
-	// Every mark but the chip is one glyph and a trailing space, which is the
-	// width this column has always been given. Holding that constant leaves every
-	// ordinary row laid out exactly as it was.
-	const glyphWidth = 2
+// stateGlyph is the first column of a row: one glyph and a space, saying what
+// the session is doing. The busy verb -- "resuming", "checking out" -- goes at
+// the right-hand end of the title line; here the glyph spins.
+func (r *InstanceRenderer) stateGlyph(i *session.Instance, beingNamed, selected bool, bg color.Color) string {
+	paint := func(style lipgloss.Style, glyph string) string {
+		return style.Background(bg).Render(glyph)
+	}
+	spin := func(style lipgloss.Style) string {
+		return paint(style, r.spinner.View()+" ")
+	}
 
-	spin := func(style lipgloss.Style) (string, int) {
-		return style.Background(bg).Render(r.spinner.View() + " "), glyphWidth
+	// Nothing to report about a session that does not exist yet. The ready dot
+	// it would otherwise carry belongs to the placeholder instance the name is
+	// being collected into, and says something untrue about it.
+	if beingNamed {
+		return paint(pausedStyle, notStartedIcon)
+	}
+
+	// An action in flight outranks every state the row would otherwise show,
+	// since it is about to change that state: a paused row being resumed is
+	// not "paused" for the next few seconds, it is "resuming".
+	if _, ok := r.busy[i]; ok {
+		return spin(workingStyle)
 	}
 
 	switch {
-	// Nothing to report about a session that does not exist yet. The Ready dot it
-	// would otherwise carry belongs to the placeholder instance the name is being
-	// collected into, and says something untrue about it.
-	case beingNamed:
-		// Blank, but painted: the column is still spent, and an unstyled hole at
-		// the end of the row shows as a notch bitten out of the selection bar.
-		return lipgloss.NewStyle().Background(bg).Render(strings.Repeat(" ", glyphWidth)), glyphWidth
 	case i.Status == session.Paused:
-		return pausedStyle.Background(bg).Render(pausedIcon), glyphWidth
+		return paint(pausedStyle, pausedIcon)
 	// Loading is the interface rebuilding the session, not the agent working, but
 	// it is still something in flight -- so it spins, in the accent.
 	case i.Status == session.Loading:
@@ -753,7 +815,7 @@ func (r *InstanceRenderer) statusMark(i *session.Instance, beingNamed, selected 
 
 	switch i.GetActivity() {
 	case session.ActivityNeedsInput:
-		return needsInputChipStyle.Render(needsInputChip), runewidth.StringWidth(needsInputChip)
+		return paint(needsInputChipStyle, needsInputChip)
 	case session.ActivityWorking:
 		return spin(workingStyle)
 	case session.ActivityShell:
@@ -773,22 +835,157 @@ func (r *InstanceRenderer) statusMark(i *session.Instance, beingNamed, selected 
 
 	if done := i.DoneAt(); !done.IsZero() {
 		if r.clock().Sub(done) < doneChipWindow {
-			return doneChipStyle.Render(doneChip), runewidth.StringWidth(doneChip)
+			return paint(doneChipStyle, doneChip)
 		}
 		// The row under the cursor is on screen in the preview, so there is
 		// nothing about it left unseen.
 		if !selected {
-			return unseenStyle.Background(bg).Render(unseenIcon), glyphWidth
+			return paint(unseenStyle, unseenIcon)
 		}
 	}
 
 	// The ready dot means "your turn". On a session whose pull request is
 	// already merged or closed there is no turn to take -- the only thing left
-	// to do with it is kill it -- so it carries no dot.
+	// to do with it is kill it -- so it carries the nothing-to-do mark instead.
 	if i.Status == session.Ready && !prSettled(i) {
-		return readyStyle.Background(bg).Render(readyIcon), glyphWidth
+		return paint(readyStyle, readyIcon)
 	}
-	return lipgloss.NewStyle().Background(bg).Render(strings.Repeat(" ", glyphWidth)), glyphWidth
+	if !i.Started() {
+		return paint(pausedStyle, notStartedIcon)
+	}
+	return paint(pausedStyle, notStartedIcon)
+}
+
+// busyMark is the verb of an action in flight, for the right-hand end of the
+// title line, and its width.
+func (r *InstanceRenderer) busyMark(i *session.Instance, bg color.Color) (string, int) {
+	doing, ok := r.busy[i]
+	if !ok {
+		return "", 0
+	}
+	mark := doing + " "
+	return workingStyle.Background(bg).Render(mark), ansi.StringWidth(mark)
+}
+
+// diffSegment is the diff count with the space before it, painted, or nothing.
+func diffSegment(diff string, bg color.Color) string {
+	if diff == "" {
+		return ""
+	}
+	return lipgloss.NewStyle().Background(bg).Render(" ") + diff
+}
+
+// RenderCompact draws a session on one line, for the compact mode and the
+// strip above the window: the glyph, the title, the branch, and at the right
+// the marks the two-line row spreads over its lines.
+//
+//	● TASK-6664 signals tab strip  ⎇ TASK-6664          ▸ ✓ ↑4 +11 −2  2h
+func (r *InstanceRenderer) RenderCompact(i *session.Instance, selected bool, isLast bool) string {
+	return r.compactAt(i, selected, isLast, r.width)
+}
+
+func (r *InstanceRenderer) compactAt(i *session.Instance, selected bool, isLast bool, width int) string {
+	total := width
+	titleS, descS := titleStyle, listDescStyle
+	if selected {
+		titleS, descS = selectedTitleStyle, selectedDescStyle
+	} else if settled(i) {
+		titleS = titleS.Foreground(theme.Color(theme.Muted))
+	}
+	bg := titleS.GetBackground()
+	paint := func(text string) string { return lipgloss.NewStyle().Background(bg).Render(text) }
+
+	beingNamed := r.naming && isLast
+	glyph := r.stateGlyph(i, beingNamed, selected, bg)
+
+	// The marks at the right, in a fixed order, each with the space before it.
+	var marks []string
+	width -= 3 + 1 // the glyph column and the trailing cell
+	add := func(styled string, plainWidth int) {
+		if styled == "" {
+			return
+		}
+		marks = append(marks, paint(" ")+styled)
+		width -= plainWidth + 1
+	}
+	if busy, w := r.busyMark(i, bg); w > 0 {
+		add(busy, w-1) // busyMark carries its own trailing space
+		width++
+	}
+	if dev, w := r.devBadge(i, bg); w > 0 {
+		add(dev, w)
+	}
+	if plain, styled := ciBadgeAt(i.GetCIStatus(), bg, badgeWordsNone); plain != "" {
+		add(styled, ansi.StringWidth(plain))
+	}
+	if plain, styled := syncBadge(i.GetUpstreamStatus(), bg, false); plain != "" {
+		add(styled, ansi.StringWidth(plain))
+	}
+	if st := i.GetDiffStats(); st != nil && st.Error == nil && !st.IsEmpty() {
+		plain := "+" + compactCount(st.Added) + " -" + compactCount(st.Removed)
+		add(addedLinesStyle.Background(bg).Render("+"+compactCount(st.Added))+paint(" ")+
+			removedLinesStyle.Background(bg).Render("-"+compactCount(st.Removed)), ansi.StringWidth(plain))
+	}
+	if age, w := r.rowAge(i, beingNamed, bg); w > 0 {
+		marks = append(marks, age) // rowAge carries its own leading space
+		width -= w
+	}
+
+	// What is left is the title and the branch, the title first: it is the
+	// row's identity, and the branch is dropped when it only echoes it.
+	titleText := i.Title
+	showPlaceholder := beingNamed && titleText == ""
+	if showPlaceholder {
+		titleText = namingPlaceholder
+	}
+	branch := ""
+	if beingNamed {
+		branch = r.branchPreview
+	} else if !i.NoWorktree() && !branchEchoesTitle(i.DisplayBranch(), i.Title) {
+		branch = i.DisplayBranch()
+	} else if i.NoWorktree() {
+		branch = filepath.Base(i.Path)
+	}
+	cursor := 0
+	if beingNamed {
+		cursor = ansi.StringWidth(namingCursor)
+	}
+	titleWidth := ansi.StringWidth(titleText) + cursor
+	branchCell := 0
+	if branch != "" {
+		branchCell = 2 + 2 + ansi.StringWidth(branch) // two spaces, the glyph and its space
+	}
+	if titleWidth+branchCell > width {
+		// The branch gives way first, then the title is cut.
+		room := width - titleWidth
+		if room < 2+2+minBranchWidth {
+			branch, branchCell = "", 0
+		} else {
+			branch = elideMiddle(branch, room-4)
+			branchCell = 4 + ansi.StringWidth(branch)
+		}
+	}
+	if titleWidth > width-branchCell && width-branchCell-cursor > 0 {
+		titleText = elideMiddle(titleText, width-branchCell-cursor)
+	}
+	if showPlaceholder {
+		titleText = namingPlaceholderStyle.Background(bg).Render(titleText)
+	} else {
+		titleText = titleS.Render(titleText)
+	}
+	if beingNamed {
+		titleText += namingCursorStyle.Background(bg).Render(namingCursor)
+	}
+	line := paint(" ") + glyph + titleText
+	if branch != "" {
+		icon := branchIcon
+		if i.NoWorktree() && !beingNamed {
+			icon = repoIcon
+		}
+		line += paint("  ") + descS.Render(icon+" "+branch)
+	}
+	line = padTo(line, total-lipgloss.Width(strings.Join(marks, ""))-1, bg) + strings.Join(marks, "") + paint(" ")
+	return padTo(clip(line, total), total, bg)
 }
 
 // prSettled reports whether the session's pull request is merged or closed.
@@ -804,10 +1001,15 @@ func settled(i *session.Instance) bool {
 }
 
 func (r *InstanceRenderer) Render(i *session.Instance, idx int, selected bool, hasMultipleRepos bool, isLast bool) string {
-	prefix := fmt.Sprintf(" %d. ", idx)
-	if idx >= 10 {
-		prefix = prefix[:len(prefix)-1]
-	}
+	// The row is two lines. The first is the state glyph, the title and, at the
+	// right, the marks that say what is happening to the session now (busy verb,
+	// dev stack); the second is the branch and the facts about it (remote,
+	// verdict, diff) with how long the row has been quiet at the end.
+	//
+	// The three cells the glyph column takes lead both lines, so the title and
+	// the branch start in the same column.
+	const lead = 3
+	prefix := "  " // the branch line's indent, two cells plus the format's own space
 	titleS := selectedTitleStyle
 	descS := selectedDescStyle
 	if !selected {
@@ -815,17 +1017,18 @@ func (r *InstanceRenderer) Render(i *session.Instance, idx int, selected bool, h
 		descS = listDescStyle
 		// A row whose work is over -- the pull request merged or closed, or the
 		// session parked -- recedes, so the live rows are what the eye lands on.
-		// The badge still says which.
+		// The glyph still says which.
 		if settled(i) {
 			titleS = titleS.Foreground(theme.Color(theme.Muted))
 		}
 	}
+	bg := titleS.GetBackground()
 
 	beingNamed := r.naming && isLast
-	join, joinWidth := r.statusMark(i, beingNamed, selected, titleS.GetBackground())
-	// How long the row has been quiet, taken out of the title's column like every
-	// other mark on the line.
-	age, ageWidth := r.rowAge(i, beingNamed, titleS.GetBackground())
+	glyph := r.stateGlyph(i, beingNamed, selected, bg)
+	busy, busyWidth := r.busyMark(i, bg)
+	// How long the row has been quiet goes at the end of the branch line.
+	age, ageWidth := r.rowAge(i, beingNamed, descS.GetBackground())
 
 	// A session being named has to look like it is being named.
 	//
@@ -843,41 +1046,39 @@ func (r *InstanceRenderer) Render(i *session.Instance, idx int, selected bool, h
 		titleText = namingPlaceholder
 	}
 
-	// Cut the title if it's too long
-	_, devMarkBudget := r.devBadge(i, titleS.GetBackground())
-	widthAvail := r.width - 1 - joinWidth - devMarkBudget - ageWidth - runewidth.StringWidth(prefix) - 1
+	// Cut the title if it's too long: the marks at the right keep their room.
+	devMark, devMarkWidth := r.devBadge(i, bg)
+	if devMarkWidth > 0 {
+		devMark += lipgloss.NewStyle().Background(bg).Render(" ")
+		devMarkWidth++
+	}
+	widthAvail := r.width - lead - busyWidth - devMarkWidth - 1
 	if beingNamed {
 		// The cursor sits after the text and has to fit beside it.
-		widthAvail -= runewidth.StringWidth(namingCursor)
+		widthAvail -= ansi.StringWidth(namingCursor)
 	}
-	if widthAvail > 0 && runewidth.StringWidth(titleText) > widthAvail {
+	if widthAvail > 0 && ansi.StringWidth(titleText) > widthAvail {
 		titleText = elideMiddle(titleText, widthAvail)
 	}
 	if showPlaceholder {
-		titleText = namingPlaceholderStyle.Background(titleS.GetBackground()).Render(titleText)
+		titleText = namingPlaceholderStyle.Background(bg).Render(titleText)
 	}
 	if beingNamed {
-		titleText += namingCursorStyle.Background(titleS.GetBackground()).Render(namingCursor)
+		titleText += namingCursorStyle.Background(bg).Render(namingCursor)
 	}
-	// The stack mark takes its width out of the title's column rather than adding
-	// to the row, so a marked row stays exactly as wide as an unmarked one.
-	devMark, devMarkWidth := r.devBadge(i, titleS.GetBackground())
-	// The separator has to carry the row's background like the segments either
-	// side of it do. Each of those is rendered with its own style, and lipgloss
-	// closes every style with a reset, so a plain " " joined between two of them
-	// falls back to the terminal's own background -- a dark notch punched through
-	// the middle of a selected row's bar. Invisible until something is drawn on
-	// both sides of it, which is why it surfaced only once the status mark started
-	// setting a background of its own.
-	gap := lipgloss.NewStyle().Background(titleS.GetBackground()).Render(" ")
-	title := titleS.Render(lipgloss.JoinHorizontal(
+	// Every segment carries the row's background. Each is rendered with its
+	// own style and lipgloss closes every style with a reset, so a plain " "
+	// between two of them falls back to the terminal's own background -- a
+	// dark notch punched through the middle of a selected row's bar.
+	title := lipgloss.JoinHorizontal(
 		lipgloss.Left,
-		padTo(fmt.Sprintf("%s %s", prefix, titleText), r.width-1-joinWidth-devMarkWidth-ageWidth, titleS.GetBackground()),
-		age,
+		lipgloss.NewStyle().Background(bg).Render(" "),
+		glyph,
+		padTo(titleS.Render(titleText), r.width-lead-busyWidth-devMarkWidth, bg),
+		busy,
 		devMark,
-		gap,
-		join,
-	))
+	)
+	title = padTo(title, r.width, bg)
 
 	stat := i.GetDiffStats()
 
@@ -892,7 +1093,7 @@ func (r *InstanceRenderer) Render(i *session.Instance, idx int, selected bool, h
 		// Compact: "+25064 -2387" cost the row enough width that the badge
 		// beside it lost every one of its words; "+25k -2.4k" pays for them.
 		addedDiff = "+" + compactCount(stat.Added)
-		removedDiff = "-" + compactCount(stat.Removed) + " "
+		removedDiff = "-" + compactCount(stat.Removed)
 		// A space rather than a comma: the two counts are separate quantities, not
 		// a list, and "+2200,-12" reads as one token. Same width either way, so the
 		// accounting below is unaffected.
@@ -905,13 +1106,14 @@ func (r *InstanceRenderer) Render(i *session.Instance, idx int, selected bool, h
 	}
 
 	remainingWidth := r.width
-	remainingWidth -= runewidth.StringWidth(prefix)
-	remainingWidth -= runewidth.StringWidth(branchIcon) // same width as repoIcon
-	remainingWidth -= 2                                 // for the literal " " and "-" in the branchLine format string
+	remainingWidth -= ansi.StringWidth(prefix)
+	remainingWidth -= ansi.StringWidth(branchIcon) // same width as repoIcon
+	remainingWidth -= 2                            // for the literal " " and "-" in the branchLine format string
+	remainingWidth -= ageWidth                     // the quiet-for mark at the end of the line
 
-	diffWidth := runewidth.StringWidth(addedDiff) + runewidth.StringWidth(removedDiff)
+	diffWidth := ansi.StringWidth(addedDiff) + ansi.StringWidth(removedDiff)
 	if diffWidth > 0 {
-		diffWidth += 1
+		diffWidth += 2 // the space between the counts and the one before them
 	}
 
 	// Use fixed width for diff stats to avoid layout issues
@@ -963,7 +1165,7 @@ func (r *InstanceRenderer) Render(i *session.Instance, idx int, selected bool, h
 			// state, and the width the icon would have taken stays spent so the
 			// line starts in the same column as every other row's.
 			branch, pendingBranch = notStartedNote, true
-			rowIcon = strings.Repeat(" ", runewidth.StringWidth(rowIcon))
+			rowIcon = strings.Repeat(" ", ansi.StringWidth(rowIcon))
 		}
 		branchIsEcho = false
 	}
@@ -1004,7 +1206,7 @@ func (r *InstanceRenderer) Render(i *session.Instance, idx int, selected bool, h
 	// would be paying for the explanation with the thing being explained.
 	badges := func(words int) (ciStyled string, ciWidth int, syncStyled string, syncWidth int) {
 		ciPlain, ciStyled := ciBadgeAt(i.GetCIStatus(), descS.GetBackground(), words)
-		ciWidth = runewidth.StringWidth(ciPlain)
+		ciWidth = ansi.StringWidth(ciPlain)
 		if ciWidth > 0 {
 			ciWidth += 2 // the spaces either side of the badge in branchLine
 		}
@@ -1015,7 +1217,7 @@ func (r *InstanceRenderer) Render(i *session.Instance, idx int, selected bool, h
 		// Its word goes last of all, with the verdict's: it is the one that says
 		// the rest of the line describes the wrong commit.
 		syncPlain, syncStyled := syncBadge(i.GetUpstreamStatus(), descS.GetBackground(), words >= badgeWordsVerdict)
-		syncWidth = runewidth.StringWidth(syncPlain)
+		syncWidth = ansi.StringWidth(syncPlain)
 		if syncWidth > 0 {
 			syncWidth++ // the space before the badge in branchLine
 		}
@@ -1025,7 +1227,7 @@ func (r *InstanceRenderer) Render(i *session.Instance, idx int, selected bool, h
 	// The words are affordable only when nothing has to be cut to fit them.
 	ciStyled, ciWidth, syncStyled, syncWidth := badges(badgeWordsAll)
 	for words := badgeWordsAll - 1; words >= badgeWordsNone &&
-		runewidth.StringWidth(branch)+ciWidth+syncWidth > remainingWidth; words-- {
+		ansi.StringWidth(branch)+ciWidth+syncWidth > remainingWidth; words-- {
 		ciStyled, ciWidth, syncStyled, syncWidth = badges(words)
 	}
 	// Up to a point: the branch name is the row's identity and the badge is an
@@ -1045,7 +1247,7 @@ func (r *InstanceRenderer) Render(i *session.Instance, idx int, selected bool, h
 	remainingWidth -= ciWidth + syncWidth
 
 	// Don't show branch if there's no space for it. Or show ellipsis if it's too long.
-	branchWidth := runewidth.StringWidth(branch)
+	branchWidth := ansi.StringWidth(branch)
 	if remainingWidth < 0 {
 		branch = ""
 	} else if remainingWidth < branchWidth {
@@ -1055,7 +1257,7 @@ func (r *InstanceRenderer) Render(i *session.Instance, idx int, selected bool, h
 			branch = elideMiddle(branch, remainingWidth)
 		}
 	}
-	remainingWidth -= runewidth.StringWidth(branch)
+	remainingWidth -= ansi.StringWidth(branch)
 
 	// Add spaces to fill the remaining width. Painted, because the hint below may
 	// have put a style -- and so a reset -- immediately before them.
@@ -1095,22 +1297,46 @@ func (r *InstanceRenderer) Render(i *session.Instance, idx int, selected bool, h
 	// stats sit in the same column as they do on every other row. Reclaiming it
 	// would make a row shift sideways for no reason the eye can attribute.
 	if branch == "" {
-		rowIcon = strings.Repeat(" ", runewidth.StringWidth(rowIcon))
+		rowIcon = strings.Repeat(" ", ansi.StringWidth(rowIcon))
 	}
 
-	// A space after the branch glyph, not a hyphen: "Ꮧ-TASK-5636" reads as though
+	// A space after the branch glyph, not a hyphen: "⎇-TASK-5636" reads as though
 	// the hyphen were part of the branch name. Still two literal characters, so
 	// the width reserved for them above is unchanged.
-	branchLine := fmt.Sprintf("%s %s %s%s%s%s%s", strings.Repeat(" ", len(prefix)), rowIcon, branch, spaces, syncSegment, ciSegment, diff)
+	//
+	// The badges follow the branch rather than sitting at the far right: a line
+	// that is mostly empty with its facts jammed against the edge read as two
+	// unrelated things, and on a row whose branch echoes its title there was
+	// nothing on the left at all. The age keeps the right-hand edge.
+	branchLine := fmt.Sprintf("%s %s %s%s%s%s%s", strings.Repeat(" ", len(prefix)), rowIcon, branch, syncSegment, ciSegment, diffSegment(diff, descS.GetBackground()), spaces)
 
 	// join title and subtitle
 	text := lipgloss.JoinVertical(
 		lipgloss.Left,
 		title,
-		descS.Render(branchLine),
+		padTo(descS.Render(branchLine)+age, r.width, descS.GetBackground()),
 	)
 
 	return text
+}
+
+// emptyListHint is the body of a list with no sessions in it, clipped to the
+// column like every row is.
+func emptyListHint(width int) string {
+	row := func(k, d string) string {
+		return clip(" "+hintKeyStyle.Width(hintKeyColumn).Render(k)+hintDescStyle.Render(d), width)
+	}
+	return strings.Join([]string{
+		"",
+		clip(" "+titleStyle.Bold(true).Render("No sessions yet"), width),
+		clip(" "+hintDescStyle.Render("An agent in its own worktree,"), width),
+		clip(" "+hintDescStyle.Render("on its own branch."), width),
+		"",
+		row("n", "new session"),
+		row("N", "new session with a prompt"),
+		row("R", "restore a killed session"),
+		row("?", "every key"),
+	}, "\n")
 }
 
 // scrollIndicator styles the "N more" markers that stand in for the rows a pane
@@ -1189,64 +1415,56 @@ func (l *List) reclaim(heights []int, budget, last int) (start, end int) {
 }
 
 func (l *List) String() string {
-	const autoYesText = " auto-yes "
-
-	// The count is otherwise only obtainable by counting rows. Omitted at zero,
-	// where "· 0" says less than the empty-state message in the preview pane.
-	titleText := " Instances "
+	// The list is a box: its name in the top border, the selection's place in
+	// the bottom one, and the rows inside. The border is the focus mark too --
+	// the pane that owns the keyboard wears the accent, the other the muted rule
+	// -- which is why the rows no longer lead with a title row of their own.
+	inner, innerHeight := max(l.width-2, 0), max(l.height-2, 0)
+	title := "Sessions"
+	if l.autoyes {
+		title += " · auto-yes"
+	}
+	foot := ""
 	if len(l.items) > 0 {
-		titleText = fmt.Sprintf(" Instances · %d ", len(l.items))
+		foot = fmt.Sprintf("%d/%d", l.selectedIdx+1, len(l.items))
+	}
+	rule := listUnfocusedRuleStyle
+	if l.focused {
+		rule = listRuleStyle
+	}
+	return frame(l.width, l.height, title, foot, l.rows(inner, innerHeight), rule, listLabelStyle)
+}
+
+// rows draws the sessions into width x height, scrolled to keep the selection
+// in view.
+func (l *List) rows(width, height int) string {
+	// With nothing to list, the body says how to get something: the pane
+	// beside it names n, and the three keys that matter here are worth the
+	// rows that would otherwise be blank.
+	if len(l.items) == 0 {
+		return emptyListHint(width)
 	}
 
-	titleLine := mainTitle.Render(titleText) + l.attentionSummary()
-
-	// Write the title.
-	//
-	// One blank row above it, not two. The pane beside it leads with the same
-	// gap, so they were both spending a row of every screen on the same piece of
-	// nothing; trimmed together they stay level, and the row goes to a session.
 	var b strings.Builder
-	b.WriteString("\n")
-
-	// Write title line
-	// add padding of 2 because the border on list items adds some extra characters
-	//
-	// Clipped to that width, because lipgloss.Place does not: given less room
-	// than its content it hands the content back whole. The rows below elide
-	// themselves, so in a narrow terminal this line alone was wider than the
-	// column it heads -- " Instances · 4 " is 15 cells against the 12 the list
-	// gets at 40 columns -- and the pane beside it was pushed off the screen.
-	titleWidth := AdjustPreviewWidth(l.width) + 2
-	if !l.autoyes {
-		b.WriteString(lipgloss.Place(
-			titleWidth, 1, lipgloss.Left, lipgloss.Bottom, clip(titleLine, titleWidth)))
-	} else {
-		half := titleWidth / 2
-		title := lipgloss.Place(
-			half, 1, lipgloss.Left, lipgloss.Bottom, clip(titleLine, half))
-		autoYes := lipgloss.Place(
-			titleWidth-half, 1, lipgloss.Right, lipgloss.Bottom,
-			clip(autoYesStyle.Render(autoYesText), titleWidth-half))
-		b.WriteString(lipgloss.JoinHorizontal(
-			lipgloss.Top, title, autoYes))
-	}
-
-	b.WriteString("\n")
-	b.WriteString("\n")
-
-	header := b.String()
+	l.rowAt = l.rowAt[:0]
 	rendered := make([]string, len(l.items))
 	heights := make([]int, len(l.items))
 	total := 0
 	for i, item := range l.items {
-		rendered[i] = l.renderer.Render(item, i+1, i == l.selectedIdx, len(l.repos) > 1, i == len(l.items)-1)
-		// The blank line that separates one session from the next belongs to the
-		// session above it, so a window's height is the sum of what it draws.
-		heights[i] = strings.Count(rendered[i], "\n") + 2
+		if l.compact {
+			rendered[i] = l.renderer.RenderCompact(item, i == l.selectedIdx, i == len(l.items)-1)
+			heights[i] = 1
+		} else {
+			rendered[i] = l.renderer.Render(item, i+1, i == l.selectedIdx, len(l.repos) > 1, i == len(l.items)-1)
+			// The blank line that separates one session from the next belongs to
+			// the session above it, so a window's height is the sum of what it
+			// draws.
+			heights[i] = strings.Count(rendered[i], "\n") + 2
+		}
 		total += heights[i]
 	}
 
-	budget := l.height - (strings.Count(header, "\n") + 1)
+	budget := height
 	// Two rows held back for the markers, but only when something is going to be
 	// hidden -- otherwise a list that fits exactly would be scrolled for nothing.
 	if total > budget {
@@ -1256,29 +1474,48 @@ func (l *List) String() string {
 	start, end := l.window(heights, budget)
 	if start > 0 {
 		b.WriteString(scrollIndicator("↑", start) + "\n")
+		l.rowAt = append(l.rowAt, -1)
 	}
 	for i := start; i < end; i++ {
 		b.WriteString(rendered[i])
+		for n := strings.Count(rendered[i], "\n") + 1; n > 0; n-- {
+			l.rowAt = append(l.rowAt, i)
+		}
 		if i != end-1 {
-			b.WriteString("\n\n")
+			if l.compact {
+				b.WriteString("\n")
+			} else {
+				b.WriteString("\n\n")
+				l.rowAt = append(l.rowAt, -1)
+			}
 		}
 	}
 	if end < len(l.items) {
 		b.WriteString("\n" + scrollIndicator("↓", len(l.items)-end))
+		l.rowAt = append(l.rowAt, -1)
 	}
+	return b.String()
+}
 
-	// Nothing may be wider than the column the list was given. lipgloss.Place
-	// pads to that width but never cuts to it, and a row that overruns pushes the
-	// pane beside it off the screen -- the whole frame then renders wider than the
-	// terminal and tmux clips its right-hand edge. The row's own accounting elides
-	// the name long before this; it is the backstop for the narrow widths where
-	// there is no room left to elide into.
-	lines := strings.Split(b.String(), "\n")
-	for i, line := range lines {
-		lines[i] = clip(line, l.width)
+// RowAt is the session drawn on row y inside the box (0 is the first row under
+// the top border), for a click. A blank row and a scroll marker are nobody's.
+func (l *List) RowAt(y int) (int, bool) {
+	if y < 0 || y >= len(l.rowAt) || l.rowAt[y] < 0 {
+		return 0, false
 	}
+	return l.rowAt[y], true
+}
 
-	return lipgloss.Place(l.width, l.height, lipgloss.Left, lipgloss.Top, strings.Join(lines, "\n"))
+// AttentionCount is how many sessions are waiting on you or have a finish you
+// have not seen: the header's number.
+func (l *List) AttentionCount() int {
+	n := 0
+	for idx := range l.items {
+		if l.wantsAttention(idx) > 0 {
+			n++
+		}
+	}
+	return n
 }
 
 // wantsAttention ranks what a session is asking of you: 2 for a question it
@@ -1301,8 +1538,13 @@ func (l *List) wantsAttention(idx int) int {
 // you, so the answer to "does anything need me?" does not take reading every
 // row. Only the states that exist are listed; a list with none says nothing.
 func (l *List) attentionSummary() string {
-	var input, unseen, working int
+	var input, unseen, working, remarks int
 	for idx, inst := range l.items {
+		// Counted apart from the switch below: a pull request waiting on your
+		// answer is independent of what the agent in its session is doing.
+		if inst.Status != session.Paused && hasOutstandingFeedback(inst.GetCIStatus()) {
+			remarks++
+		}
 		switch l.wantsAttention(idx) {
 		case 2:
 			input++
@@ -1325,6 +1567,9 @@ func (l *List) attentionSummary() string {
 	}
 	if unseen > 0 {
 		parts = append(parts, unseenStyle.Render(fmt.Sprintf("%s%d new", unseenIcon, unseen)))
+	}
+	if remarks > 0 {
+		parts = append(parts, ciPendingStyle.Render(fmt.Sprintf("%s %d PR feedback", ciCommentIcon, remarks)))
 	}
 	if working > 0 {
 		parts = append(parts, workingStyle.Render(fmt.Sprintf("%s %d working", spinnerLegendFrame, working)))

@@ -3,8 +3,6 @@ package config
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/AlexanderWeismannn/adroit/log"
-	"github.com/AlexanderWeismannn/adroit/theme"
 	"os"
 	"os/exec"
 	"os/user"
@@ -12,6 +10,9 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+
+	"github.com/AlexanderWeismannn/adroit/log"
+	"github.com/AlexanderWeismannn/adroit/theme"
 )
 
 const (
@@ -154,10 +155,14 @@ type Config struct {
 	// GitHubCIStatus. Inside tmux the bell reaches the outer terminal, which is
 	// what makes Windows Terminal flash the taskbar of an unfocused window.
 	Bell *bool `json:"bell,omitempty"`
+	// Mouse lets a click select a row or switch a tab. Off by default: a click
+	// in a terminal multiplexer is often meant for the multiplexer, and the
+	// wheel scrolls either way.
+	Mouse *bool `json:"mouse,omitempty"`
 	// NotifyCommand, when set, is run through `sh -c` on the same events, for a
 	// desktop notification the bell cannot give. It gets ADROIT_SESSION (the
-	// session's title) and ADROIT_EVENT ("finished" or "needs-input") in its
-	// environment. Its output is discarded and it is not waited on.
+	// session's title) and ADROIT_EVENT ("finished", "needs-input",
+	// "pr-comment", "pr-changes-requested" or "pr-approved") in its environment. Its output is discarded and it is not waited on.
 	NotifyCommand string `json:"notify_command,omitempty"`
 	// Dev describes the development stack a session can run, for any repository
 	// with no entry of its own in Repos. Nil disables the feature: there is
@@ -272,6 +277,11 @@ func (c *Config) UpstreamStatusEnabled() bool {
 // BellEnabled reports whether a session needing attention rings the bell.
 func (c *Config) BellEnabled() bool {
 	return c.Bell == nil || *c.Bell
+}
+
+// MouseEnabled reports whether a click selects a row or switches a tab.
+func (c *Config) MouseEnabled() bool {
+	return c.Mouse != nil && *c.Mouse
 }
 
 // SyncBaseBranchEnabled reports whether the default branch should be brought up

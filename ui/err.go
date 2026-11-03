@@ -1,11 +1,12 @@
 package ui
 
 import (
-	"github.com/AlexanderWeismannn/adroit/theme"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
-	"github.com/mattn/go-runewidth"
+	"github.com/AlexanderWeismannn/adroit/theme"
+
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // ErrBox is the one-row footer that reports what just happened.
@@ -76,10 +77,15 @@ func (e *ErrBox) String() string {
 		text, style = noticeIcon+collapse(e.notice), noticeStyle
 	}
 
-	if runewidth.StringWidth(text) > e.width-3 && e.width-3 >= 0 {
-		text = runewidth.Truncate(text, e.width-3, "…")
+	if ansi.StringWidth(text) > e.width-3 && e.width-3 >= 0 {
+		text = ansi.Truncate(text, e.width-3, "…")
 	}
-	return lipgloss.Place(e.width, e.height, lipgloss.Center, lipgloss.Center, style.Render(text))
+	// Left, under the bar's first entry, rather than centred: the eye reads the
+	// bar from the left and the line below it from the same edge.
+	if text != "" {
+		text = " " + text
+	}
+	return lipgloss.Place(e.width, e.height, lipgloss.Left, lipgloss.Center, style.Render(text))
 }
 
 // collapse folds a multi-line message onto the box's single row. " · " reads as

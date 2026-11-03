@@ -2,17 +2,18 @@ package app
 
 import (
 	"fmt"
+	"os"
+	"strconv"
+	"time"
+
 	"github.com/AlexanderWeismannn/adroit/config"
 	"github.com/AlexanderWeismannn/adroit/log"
 	"github.com/AlexanderWeismannn/adroit/session"
 	"github.com/AlexanderWeismannn/adroit/session/resume"
 	"github.com/AlexanderWeismannn/adroit/ui"
 	"github.com/AlexanderWeismannn/adroit/ui/overlay"
-	"os"
-	"strconv"
-	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // Killing a session destroys its worktree and its branch, and there is no
@@ -95,12 +96,11 @@ func (m *home) openRestorePicker() (tea.Model, tea.Cmd) {
 		})
 	}
 
-	m.restorePicker = overlay.NewRestorePicker(entries)
+	picker := overlay.NewRestorePicker(entries)
 	if m.termWidth > 0 {
-		// Two columns of border and padding on each side, plus a little air.
-		m.restorePicker.SetWidth(min(74, m.termWidth-4))
+		picker.SetWidth(min(74, max(m.layout.Overlay.W, m.termWidth-4)))
 	}
-	m.state = stateRestore
+	m.overlay = &restoreScreen{picker: picker}
 	return m, nil
 }
 
@@ -110,38 +110,6 @@ func transcriptExists(record config.KilledSession) bool {
 	}
 	_, err := os.Stat(record.TranscriptPath)
 	return err == nil
-}
-
-// handleRestoreState drives the picker: moving changes nothing but the cursor,
-// enter starts the chosen session, and every way out leaves the list untouched.
-func (m *home) handleRestoreState(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if m.restorePicker == nil {
-		m.state = stateDefault
-		return m, nil
-	}
-
-	// ctrl+c closes the picker rather than quitting, matching the other overlays.
-	if msg.String() == "ctrl+c" {
-		return m, m.closeRestorePicker()
-	}
-
-	switch m.restorePicker.HandleKeyPress(msg) {
-	case overlay.PickerCancel:
-		return m, m.closeRestorePicker()
-	case overlay.PickerConfirm:
-		entry, ok := m.restorePicker.Selected()
-		if !ok {
-			return m, m.closeRestorePicker()
-		}
-		record, found := m.killedSessionFor(entry)
-		closeCmd := m.closeRestorePicker()
-		if !found {
-			return m, tea.Batch(closeCmd, m.handleError(fmt.Errorf("could not find %q to restore", entry.Title)))
-		}
-		model, restoreCmd := m.restoreSession(record)
-		return model, tea.Batch(closeCmd, restoreCmd)
-	}
-	return m, nil
 }
 
 // killedSessionFor maps the chosen row back to the record behind it. The picker
@@ -154,18 +122,6 @@ func (m *home) killedSessionFor(entry overlay.RestoreEntry) (config.KilledSessio
 		}
 	}
 	return config.KilledSession{}, false
-}
-
-func (m *home) closeRestorePicker() tea.Cmd {
-	m.restorePicker = nil
-	m.state = stateDefault
-	return tea.Sequence(
-		tea.WindowSize(),
-		func() tea.Msg {
-			m.menu.SetState(ui.StateDefault)
-			return nil
-		},
-	)
 }
 
 // restoreSession starts a new session that picks up a killed one's conversation.
@@ -225,7 +181,7 @@ func (m *home) restoreSession(record config.KilledSession) (tea.Model, tea.Cmd) 
 		err := instance.Start(true)
 		return instanceStartedMsg{instance: instance, err: err}
 	}
-	return m, tea.Batch(tea.WindowSize(), m.instanceChanged(), startCmd)
+	return m, tea.Batch(tea.RequestWindowSize, m.instanceChanged(), startCmd)
 }
 
 // uniqueTitle keeps a restored session from colliding with one already in the

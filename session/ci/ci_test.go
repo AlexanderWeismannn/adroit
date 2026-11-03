@@ -327,6 +327,22 @@ func TestLastRemarkTakesTheLatestAcrossReviewsAndComments(t *testing.T) {
 	require.Equal(t, base.Add(10*time.Minute), last)
 }
 
+// Your own replies and "@bot review" nudges are you talking. Counting them made
+// every pull request you had just answered read as waiting on you again.
+func TestTheAuthorsOwnRemarksAreNotFeedback(t *testing.T) {
+	pushed := time.Now().Add(-time.Hour)
+	me, them := author{Login: "AlexanderWeismannn"}, author{Login: "copilot-pull-request-reviewer"}
+	v := prView{
+		Author:        me,
+		LatestReviews: []reviewEntry{{Author: them, State: "COMMENTED", SubmittedAt: pushed.Add(-time.Minute)}},
+		Comments:      []commentEntry{{Author: author{Login: "alexanderweismannn"}, CreatedAt: pushed.Add(time.Minute)}},
+	}
+
+	last, _ := v.lastRemark()
+	require.Equal(t, pushed.Add(-time.Minute), last, "the reviewer's remark, not the author's later reply")
+	require.Equal(t, FeedbackAddressed, feedbackState(v, pushed))
+}
+
 // A settled pull request is looked up rarely; a live one on the normal clock.
 func TestSettledPullRequestsAreRefreshedRarely(t *testing.T) {
 	for _, st := range []State{StateMerged, StateClosed} {

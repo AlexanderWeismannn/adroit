@@ -2,16 +2,17 @@ package ui
 
 import (
 	"fmt"
-	"github.com/AlexanderWeismannn/adroit/log"
-	"github.com/AlexanderWeismannn/adroit/session"
-	"github.com/AlexanderWeismannn/adroit/session/tmux"
-	"github.com/AlexanderWeismannn/adroit/theme"
 	"os"
 	"strings"
 	"sync"
 
-	"github.com/charmbracelet/bubbles/viewport"
-	"github.com/charmbracelet/lipgloss"
+	"github.com/AlexanderWeismannn/adroit/log"
+	"github.com/AlexanderWeismannn/adroit/session"
+	"github.com/AlexanderWeismannn/adroit/session/tmux"
+	"github.com/AlexanderWeismannn/adroit/theme"
+
+	"charm.land/bubbles/v2/viewport"
+	"charm.land/lipgloss/v2"
 )
 
 var terminalPaneStyle, terminalFooterStyle lipgloss.Style
@@ -56,7 +57,7 @@ type TerminalPane struct {
 func NewTerminalPane() *TerminalPane {
 	return &TerminalPane{
 		sessions: make(map[string]*terminalSession),
-		viewport: viewport.New(0, 0),
+		viewport: viewport.New(),
 	}
 }
 
@@ -66,8 +67,8 @@ func (t *TerminalPane) SetSize(width, height int) {
 	defer t.mu.Unlock()
 	t.width = width
 	t.height = height
-	t.viewport.Width = width
-	t.viewport.Height = height
+	t.viewport.SetWidth(width)
+	t.viewport.SetHeight(height)
 	if s, ok := t.sessions[t.currentTitle]; ok && s.tmuxSession != nil {
 		if err := s.tmuxSession.SetDetachedSize(width, height); err != nil {
 			log.InfoLog.Printf("terminal pane: failed to set detached size: %v", err)
@@ -125,6 +126,44 @@ func (t *TerminalPane) UpdateContent(instance *session.Instance) error {
 	t.fallback = false
 	t.content = content
 	return nil
+}
+
+// Sample captures the shell pane the tab is showing for instance, off the
+// event loop. It reports ok=false when there is nothing to sample -- no shell
+// open for this instance yet, or the pane in scroll mode -- and never creates
+// one: UpdateContent does that, on the loop, when the tab is opened.
+//
+// The capture forks tmux, so the lock is held only to find the session and
+// again to apply the result; String() takes the same lock on every render and
+// must not wait on a capture.
+func (t *TerminalPane) Sample(instance *session.Instance) (content string, ok bool, err error) {
+	t.mu.Lock()
+	if instance == nil || t.isScrolling || instance.Title != t.currentTitle {
+		t.mu.Unlock()
+		return "", false, nil
+	}
+	s, found := t.sessions[t.currentTitle]
+	t.mu.Unlock()
+	if !found || s.tmuxSession == nil {
+		return "", false, nil
+	}
+	content, err = s.tmuxSession.CapturePaneContent()
+	if err != nil {
+		return "", false, fmt.Errorf("terminal pane: failed to capture content: %w", err)
+	}
+	return content, true, nil
+}
+
+// ApplySample hands the pane a capture Sample took, unless the pane has moved
+// on since: another instance, or scroll mode entered meanwhile.
+func (t *TerminalPane) ApplySample(instance *session.Instance, content string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if instance == nil || t.isScrolling || instance.Title != t.currentTitle {
+		return
+	}
+	t.fallback = false
+	t.content = content
 }
 
 // ensureSession creates or reuses a cached terminal tmux session for the given instance.
@@ -364,7 +403,7 @@ func (t *TerminalPane) ScrollUp() error {
 	if !t.isScrolling {
 		return t.enterScrollMode()
 	}
-	t.viewport.LineUp(1)
+	t.viewport.ScrollUp(1)
 	return nil
 }
 
@@ -375,7 +414,7 @@ func (t *TerminalPane) ScrollDown() error {
 	if !t.isScrolling {
 		return t.enterScrollMode()
 	}
-	t.viewport.LineDown(1)
+	t.viewport.ScrollDown(1)
 	return nil
 }
 

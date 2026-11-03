@@ -2,12 +2,13 @@ package overlay
 
 import (
 	"fmt"
-	"github.com/AlexanderWeismannn/adroit/theme"
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"github.com/AlexanderWeismannn/adroit/theme"
+
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // RestoreEntry is one killed session offered back to the user.
@@ -59,8 +60,8 @@ func (r *RestorePicker) SetWidth(width int) {
 	}
 }
 
-func (r *RestorePicker) HandleKeyPress(msg tea.KeyMsg) PickerAction {
-	switch msg.Type {
+func (r *RestorePicker) HandleKeyPress(msg tea.KeyPressMsg) PickerAction {
+	switch msg.Code {
 	case tea.KeyUp:
 		return r.move(-1)
 	case tea.KeyDown:
@@ -70,10 +71,11 @@ func (r *RestorePicker) HandleKeyPress(msg tea.KeyMsg) PickerAction {
 			return PickerCancel
 		}
 		return PickerConfirm
-	case tea.KeyEsc:
+	case tea.KeyEscape:
 		return PickerCancel
-	case tea.KeyRunes:
-		switch string(msg.Runes) {
+	}
+	if msg.Text != "" && msg.Mod == 0 {
+		switch msg.Text {
 		case "k":
 			return r.move(-1)
 		case "j":
@@ -106,13 +108,11 @@ const maxRestoreRows = 8
 
 func (r *RestorePicker) Render() string {
 	var body strings.Builder
-	body.WriteString(restoreTitleStyle.Render("Restore a killed session"))
-	body.WriteString(restoreHintStyle.Render("   ↑↓ select · enter restore · esc cancel"))
-	body.WriteString("\n\n")
+	footer := Keys(Key{"↑↓", "select"}, Key{"enter", "restore"}, Key{"esc", "cancel"})
 
 	if len(r.entries) == 0 {
-		body.WriteString(restoreHintStyle.Render("  Nothing to restore — no session has been killed yet."))
-		return restoreBorderStyle.Render(body.String())
+		body.WriteString(restoreHintStyle.Render("Nothing to restore — no session has been killed yet."))
+		return Frame(r.width, "Restore a killed session", body.String(), footer, theme.Color(theme.Accent))
 	}
 
 	start := 0
@@ -170,7 +170,7 @@ func (r *RestorePicker) Render() string {
 			fmt.Sprintf("  %d more below", len(r.entries)-end)))
 	}
 
-	return restoreBorderStyle.Width(r.width).Render(body.String())
+	return Frame(r.width, "Restore a killed session", body.String(), footer, theme.Color(theme.Accent))
 }
 
 // describe is the right-hand metadata of a row: how long ago it was killed, and

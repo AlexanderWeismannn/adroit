@@ -1,9 +1,10 @@
 package ui
 
 import (
-	"github.com/charmbracelet/lipgloss"
 	"strings"
 	"testing"
+
+	"charm.land/lipgloss/v2"
 
 	"github.com/AlexanderWeismannn/adroit/session"
 	"github.com/AlexanderWeismannn/adroit/session/dev"
@@ -48,7 +49,7 @@ func TestSelectRunTabIsTheTabTheWindowReports(t *testing.T) {
 	require.Equal(t, RunTab, w.GetActiveTab())
 
 	w.SetSize(120, 40)
-	require.Contains(t, w.String(), "Run", "the run tab must be drawn in the tab bar")
+	require.Contains(t, plain(w.String()), "Run", "the run tab must be drawn in the tab bar")
 }
 
 // Toggle has to reach the run tab, or the only way in is the key that starts a
@@ -128,7 +129,8 @@ func TestTheRunTabDropsItsIndicatorRatherThanWrapping(t *testing.T) {
 	require.Equal(t, "Run "+lampUpGlyph, plain(w.runTabLabel(5)), "just enough room")
 }
 
-// And the whole bar still renders one row per tab at a realistic width.
+// The bar is names only: the stack's state is said in the footer, not on the
+// tab. The whole bar still renders as one row at a realistic width.
 func TestTheTabBarStaysOneRowWithTheIndicator(t *testing.T) {
 	w := newTestTabbedWindow()
 	w.SetSize(80, 20)
@@ -143,7 +145,8 @@ func TestTheTabBarStaysOneRowWithTheIndicator(t *testing.T) {
 		}
 	}
 	require.Contains(t, bar, "Preview")
-	require.Contains(t, bar, "Run "+lampUpGlyph)
+	require.Contains(t, bar, "Run")
+	require.NotContains(t, bar, lampUpGlyph, "the stack's state lives in the footer now")
 	require.NotContains(t, bar, "\n")
 }
 
@@ -152,7 +155,7 @@ func TestTheTabBarStaysOneRowWithTheIndicator(t *testing.T) {
 // either side of it came apart. The name gives way rather than the layout.
 func TestANarrowTabGivesUpItsLabelRatherThanTheBar(t *testing.T) {
 	w := newTestTabbedWindow()
-	w.SetSize(42, 20)
+	w.SetSize(30, 20)
 
 	rows := strings.Split(w.String(), "\n")
 	labelRow := -1
@@ -164,7 +167,7 @@ func TestANarrowTabGivesUpItsLabelRatherThanTheBar(t *testing.T) {
 	}
 	require.NotEqual(t, -1, labelRow, "the bar should have a row of labels")
 	require.Contains(t, plain(rows[labelRow]), "Run", "every label sits on that one row")
-	require.Equal(t, 42, lipgloss.Width(rows[labelRow]), "the bar is exactly as wide as the window")
+	require.Equal(t, 30, lipgloss.Width(rows[labelRow]), "the bar is exactly as wide as the window")
 	require.True(t, strings.HasPrefix(plain(rows[labelRow]), "╭") && strings.HasSuffix(plain(rows[labelRow]), "╮"),
 		"and is the window's own top border")
 	// A wrapped label leaves its tail on that closing row -- "Termina" above and
@@ -191,4 +194,71 @@ func TestTheWindowNeverHandsAPaneANegativeSize(t *testing.T) {
 			}
 		}
 	}
+}
+
+// The window's bottom border says whether what the pane shows is live. A live
+// pane and a stale one -- a parked session, a tab scrolled back into history
+// -- were identical under the same border, and the only way to tell was to
+// wait and see whether anything moved.
+func TestTheFooterSaysWhetherThePaneIsLive(t *testing.T) {
+	w := newTestTabbedWindow()
+	w.SetSize(60, 20)
+
+	status, _ := w.paneStatus()
+	require.Equal(t, "", status, "no session, nothing to say")
+
+	inst, err := session.FromInstanceData(session.InstanceData{
+		Title: "a", Path: t.TempDir(), Status: session.Paused, Program: "claude", NoWorktree: true,
+	})
+	require.NoError(t, err)
+	w.SetInstance(inst)
+	status, _ = w.paneStatus()
+	require.Equal(t, "⏸ paused · r resumes", status)
+
+	w.activeTab = DiffTab
+	status, _ = w.paneStatus()
+	require.Equal(t, "", status, "an unscrolled diff is just the diff")
+
+	// The footer is the bottom border, exactly as wide as the tab bar above it,
+	// and the whole window still occupies the rows it was given.
+	w.activeTab = PreviewTab
+	lines := strings.Split(w.String(), "\n")
+	require.Len(t, lines, 20)
+	require.Equal(t, lipgloss.Width(lines[1]), lipgloss.Width(lines[len(lines)-1]))
+	require.True(t, strings.HasPrefix(plain(lines[len(lines)-1]), "╰─ ⏸ paused · r resumes "), plain(lines[len(lines)-1]))
+	require.True(t, strings.HasSuffix(plain(lines[len(lines)-1]), "╯"))
+}
+
+// A footer too long for the width is dropped rather than wrapped: a second row
+// takes the layout with it.
+func TestTheFooterGivesWayRatherThanWrapping(t *testing.T) {
+	w := newTestTabbedWindow()
+	inst, err := session.FromInstanceData(session.InstanceData{
+		Title: "a", Path: t.TempDir(), Status: session.Paused, Program: "claude", NoWorktree: true,
+	})
+	require.NoError(t, err)
+	w.SetInstance(inst)
+	for _, width := range []int{40, 12, 6, 3, 2} {
+		footer := w.footer(width)
+		require.Equal(t, width, lipgloss.Width(footer), "width %d", width)
+		require.NotContains(t, footer, "\n")
+	}
+}
+
+// A click on the bar lands on the tab whose name is under it, as the bar was
+// last drawn.
+func TestTabAtFollowsTheDrawnBar(t *testing.T) {
+	w := newTestTabbedWindow()
+	w.SetSize(80, 20)
+	_ = w.String()
+	bar := plain(strings.Split(w.String(), "\n")[0])
+	for name, tab := range map[string]int{"Preview": PreviewTab, "Diff": DiffTab, "Terminal": TerminalTab, "Run": RunTab} {
+		x := strings.Index(bar, name) // cells: the bar is ASCII and box drawing, one cell each
+		x = len([]rune(bar[:x]))
+		got, ok := w.TabAt(x + 1)
+		require.True(t, ok, name)
+		require.Equal(t, tab, got, name)
+	}
+	_, ok := w.TabAt(0)
+	require.False(t, ok, "the corner is no tab")
 }

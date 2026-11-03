@@ -6,8 +6,6 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
-	"github.com/AlexanderWeismannn/adroit/cmd"
-	"github.com/AlexanderWeismannn/adroit/log"
 	"io"
 	"os"
 	"os/exec"
@@ -16,6 +14,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/AlexanderWeismannn/adroit/cmd"
+	"github.com/AlexanderWeismannn/adroit/log"
 
 	"github.com/creack/pty"
 	"github.com/muesli/cancelreader"
@@ -115,6 +116,30 @@ type TmuxSession struct {
 }
 
 const TmuxPrefix = "adroit_"
+
+// attached is the session the terminal is handed to right now, if any. There is
+// one terminal, so there is at most one. It is what lets something other than
+// the session's own input pump end an attach: a SIGTERM arrives on its own
+// goroutine knowing nothing about which session is on screen.
+var (
+	attachedMu sync.Mutex
+	attached   *TmuxSession
+)
+
+// DetachAttached ends whichever attach currently holds the terminal, leaving no
+// client behind, and reports whether there was one.
+func DetachAttached() bool {
+	attachedMu.Lock()
+	t := attached
+	attachedMu.Unlock()
+	if t == nil {
+		return false
+	}
+	if err := t.DetachSafely(); err != nil {
+		log.ErrorLog.Printf("errors while detaching from %s: %v", t.sanitizedName, err)
+	}
+	return true
+}
 
 // ErrSessionNotFound is returned when the tmux session backing an instance is gone, which
 // happens whenever the tmux server dies (reboot, crash, `tmux kill-server`).
@@ -325,6 +350,91 @@ func (t *TmuxSession) CheckAndHandleTrustPrompt() bool {
 		}
 	}
 	return false
+}
+
+// shellNames are what tmux reports as #{pane_current_command} when a pane's
+// foreground process is an interactive shell -- a pane with nothing running.
+var shellNames = map[string]bool{
+	"sh": true, "bash": true, "zsh": true, "fish": true, "dash": true, "ksh": true,
+	"tcsh": true, "csh": true, "nu": true, "elvish": true, "xonsh": true, "pwsh": true,
+}
+
+// isShellCommand reports whether a process name, or a command line's
+// executable, is a shell. A login shell announces itself with a leading dash.
+func isShellCommand(command string) bool {
+	fields := strings.Fields(command)
+	if len(fields) == 0 {
+		return false
+	}
+	name := strings.TrimPrefix(fields[0], "-")
+	if i := strings.LastIndex(name, "/"); i >= 0 {
+		name = name[i+1:]
+	}
+	return shellNames[name]
+}
+
+// PaneForeground reports the pane's foreground process: its name as tmux
+// reports it, and its pid.
+func (t *TmuxSession) PaneForeground() (name string, pid int, err error) {
+	cmd := exec.Command("tmux", "display-message", "-p", "-t", PaneTarget(t.sanitizedName),
+		"#{pane_pid} #{pane_current_command}")
+	output, err := t.cmdExec.Output(cmd)
+	if err != nil {
+		return "", 0, fmt.Errorf("error reading the foreground process of %s: %w", t.sanitizedName, err)
+	}
+	fields := strings.SplitN(strings.TrimSpace(string(output)), " ", 2)
+	if len(fields) != 2 {
+		return "", 0, fmt.Errorf("error reading the foreground process of %s: unexpected %q", t.sanitizedName, output)
+	}
+	pid, err = strconv.Atoi(fields[0])
+	if err != nil {
+		return "", 0, fmt.Errorf("error reading the foreground process of %s: bad pid %q", t.sanitizedName, fields[0])
+	}
+	return fields[1], pid, nil
+}
+
+// childless reports whether pid has no child processes.
+//
+// pgrep exits 1 for "nothing matched" and 0 with the pids otherwise; any other
+// outcome -- no pgrep on this machine, a syntax error -- answers false, so an
+// unanswerable question never costs a session.
+func childless(cmdExec cmd.Executor, pid int) bool {
+	if _, err := cmdExec.Output(exec.Command("pgrep", "-P", strconv.Itoa(pid))); err != nil {
+		var exitErr *exec.ExitError
+		return errors.As(err, &exitErr) && exitErr.ExitCode() == 1
+	}
+	return false
+}
+
+// IsHusk reports whether the session exists in name only: its pane is an idle
+// shell where the program should be.
+//
+// A session with the right name is not necessarily one Adroit started.
+// tmux-resurrect, run by tmux-continuum when the server comes back after a
+// reboot, rebuilds every session it saved by name, in the saved directory --
+// and a program it does not know how to relaunch, which claude is, comes back
+// as the user's shell. Start then found a session called adroit_<title>,
+// attached to it, and the preview showed a prompt where the conversation had
+// been, with the row reading Running.
+//
+// Two tells, both required. The foreground process is a shell: not the start
+// command, which resurrect sets too (a cat of the saved screen, then an exec of
+// the shell). And that shell has no children: tmux runs the program through
+// the user's shell, and a shell that does not exec its last command -- one
+// given a sequence, say -- stays in the foreground with the program under it,
+// which is a session doing its job. A program that is itself a shell cannot be
+// told apart from its husk and is never one; a read that fails answers false,
+// since a session is only ever thrown away on evidence.
+func (t *TmuxSession) IsHusk() bool {
+	if isShellCommand(t.program) {
+		return false
+	}
+	name, pid, err := t.PaneForeground()
+	if err != nil {
+		log.WarningLog.Printf("%v", err)
+		return false
+	}
+	return isShellCommand(name) && childless(t.cmdExec, pid)
 }
 
 // Restore attaches to an existing session and restores the window size
@@ -664,6 +774,10 @@ func (t *TmuxSession) Attach() (chan struct{}, error) {
 	t.attachCh = attachCh
 	t.stdin = stdin
 
+	attachedMu.Lock()
+	attached = t
+	attachedMu.Unlock()
+
 	t.wg = &sync.WaitGroup{}
 	t.wg.Add(1)
 	t.ctx, t.cancel = context.WithCancel(context.Background())
@@ -847,6 +961,12 @@ func (t *TmuxSession) detach(wait, restore bool) error {
 	if ch == nil {
 		return nil
 	}
+
+	attachedMu.Lock()
+	if attached == t {
+		attached = nil
+	}
+	attachedMu.Unlock()
 
 	var errs []error
 

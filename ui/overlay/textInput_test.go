@@ -1,11 +1,12 @@
 package overlay
 
 import (
-	"github.com/AlexanderWeismannn/adroit/config"
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	"github.com/AlexanderWeismannn/adroit/config"
+
+	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/require"
 )
 
@@ -53,7 +54,7 @@ func TestBranchPickerAnnouncesItself(t *testing.T) {
 
 	o.FocusBranchPicker()
 	focused := o.Render()
-	require.Contains(t, focused, "type to filter")
+	require.Contains(t, focused, "filter ·")
 	require.Contains(t, focused, "ctrl+s start")
 	require.NotContains(t, focused, "tab to choose an existing branch",
 		"once focused, the hint to reach it is stale")
@@ -63,9 +64,10 @@ func TestBranchPickerAnnouncesItself(t *testing.T) {
 func TestOverlayHeaderNamesTheNavigationKeys(t *testing.T) {
 	withPicker := NewTextInputOverlayWithBranchPicker("Enter prompt", "", nil)
 	withPicker.SetSize(84, 3)
-	header := strings.SplitN(withPicker.Render(), "\n", 4)[2]
-	require.Contains(t, header, "tab")
-	require.Contains(t, header, "esc")
+	lines := strings.Split(withPicker.Render(), "\n")
+	footer := lines[len(lines)-2] // the frame's key row, above the bottom border
+	require.Contains(t, footer, "tab")
+	require.Contains(t, footer, "esc")
 
 	// Two stops need no explaining: tab reaches the button and that is all.
 	plain := NewTextInputOverlay("Enter prompt", "")
@@ -85,7 +87,7 @@ func TestNoWorktreeOptionIsDistinctFromNewBranch(t *testing.T) {
 	require.Equal(t, "", o.GetSelectedBranch())
 	require.False(t, o.IsNoWorktreeSelected(), "new-branch must not read as no-worktree")
 
-	down := tea.KeyMsg{Type: tea.KeyDown}
+	down := tea.KeyPressMsg{Code: tea.KeyDown}
 	o.HandleKeyPress(down)
 	require.Equal(t, "", o.GetSelectedBranch(), "the no-worktree option names no branch")
 	require.True(t, o.IsNoWorktreeSelected())
@@ -119,7 +121,7 @@ func TestOverlayShowsItsOwnErrors(t *testing.T) {
 
 	// Any key is an attempt to fix it, so the message goes rather than sitting
 	// there through the correction.
-	o.HandleKeyPress(tea.KeyMsg{Type: tea.KeyDown})
+	o.HandleKeyPress(tea.KeyPressMsg{Code: tea.KeyDown})
 	require.NotContains(t, o.Render(), "✗")
 }
 
@@ -128,13 +130,13 @@ func TestOverlayShowsItsOwnErrors(t *testing.T) {
 func TestCtrlSSubmitsFromAnyField(t *testing.T) {
 	o := NewTextInputOverlayWithBranchPicker("Enter prompt", "", nil)
 	o.SetSize(84, 10)
-	closed, _ := o.HandleKeyPress(tea.KeyMsg{Type: tea.KeyCtrlS})
+	closed, _ := o.HandleKeyPress(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	require.True(t, closed)
 	require.True(t, o.IsSubmitted())
 
 	o = NewTextInputOverlayWithBranchPicker("Enter prompt", "", nil)
 	o.FocusBranchPicker()
-	closed, _ = o.HandleKeyPress(tea.KeyMsg{Type: tea.KeyCtrlS})
+	closed, _ = o.HandleKeyPress(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	require.True(t, closed && o.IsSubmitted())
 }
 
@@ -146,8 +148,8 @@ func TestTheChosenBranchStaysMarkedAfterFocusMovesOn(t *testing.T) {
 	o := NewTextInputOverlayWithBranchPicker("Enter prompt (optional)", "", nil)
 	o.FocusBranchPicker()
 	o.SetSize(80, 5)
-	o.HandleKeyPress(tea.KeyMsg{Type: tea.KeyDown})
-	o.HandleKeyPress(tea.KeyMsg{Type: tea.KeyEnter})
+	o.HandleKeyPress(tea.KeyPressMsg{Code: tea.KeyDown})
+	o.HandleKeyPress(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	require.True(t, o.IsNoWorktreeSelected())
 	require.Contains(t, o.Render(), "✓ No branch (run in the repo itself)")
@@ -163,19 +165,19 @@ func TestTabStepsThroughTheBranchOptions(t *testing.T) {
 	o.FocusBranchPicker()
 	o.SetBranchResults([]string{"feature"}, o.BranchFilterVersion())
 
-	o.HandleKeyPress(tea.KeyMsg{Type: tea.KeyTab})
+	o.HandleKeyPress(tea.KeyPressMsg{Code: tea.KeyTab})
 	require.True(t, o.isBranchPicker(), "tab inside the list must stay in the list")
 	require.True(t, o.IsNoWorktreeSelected(), "one tab from the top is \"No branch\"")
 
-	o.HandleKeyPress(tea.KeyMsg{Type: tea.KeyTab})
+	o.HandleKeyPress(tea.KeyPressMsg{Code: tea.KeyTab})
 	require.Equal(t, "feature", o.GetSelectedBranch())
-	o.HandleKeyPress(tea.KeyMsg{Type: tea.KeyTab})
+	o.HandleKeyPress(tea.KeyPressMsg{Code: tea.KeyTab})
 	require.True(t, o.isEnterButton(), "tab from the last option moves on to the next field")
 
 	o.FocusBranchPicker()
-	o.HandleKeyPress(tea.KeyMsg{Type: tea.KeyShiftTab})
+	o.HandleKeyPress(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
 	require.True(t, o.IsNoWorktreeSelected(), "shift+tab steps back up the list")
-	o.HandleKeyPress(tea.KeyMsg{Type: tea.KeyShiftTab})
-	o.HandleKeyPress(tea.KeyMsg{Type: tea.KeyShiftTab})
+	o.HandleKeyPress(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
+	o.HandleKeyPress(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
 	require.True(t, o.isTextarea(), "shift+tab from the top option moves back to the prompt")
 }

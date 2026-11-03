@@ -1,15 +1,22 @@
 package overlay
 
 import (
+	"image/color"
+
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/AlexanderWeismannn/adroit/theme"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 )
 
 // ConfirmationOverlay represents a confirmation dialog overlay
 type ConfirmationOverlay struct {
 	// Whether the overlay has been dismissed
 	Dismissed bool
+	// Title is what the dialog is about, in the border; message is the body:
+	// what is lost, and what can be recovered.
+	Title string
+	// ConfirmLabel and CancelLabel are the footer's words for the two keys.
+	ConfirmLabel, CancelLabel string
 	// Message to display in the overlay
 	message string
 	// Width of the overlay
@@ -23,17 +30,19 @@ type ConfirmationOverlay struct {
 	// Custom cancel key (defaults to 'n')
 	CancelKey string
 	// Custom styling options
-	borderColor lipgloss.TerminalColor
+	borderColor color.Color
 }
 
 // NewConfirmationOverlay creates a new confirmation dialog overlay with the given message
 func NewConfirmationOverlay(message string) *ConfirmationOverlay {
 	return &ConfirmationOverlay{
-		Dismissed:  false,
-		message:    message,
-		width:      50, // Default width
-		ConfirmKey: "y",
-		CancelKey:  "n",
+		Dismissed:    false,
+		message:      message,
+		width:        50, // Default width
+		ConfirmKey:   "y",
+		CancelKey:    "n",
+		ConfirmLabel: "confirm",
+		CancelLabel:  "cancel",
 		// Danger, because every confirmation is guarding something destructive.
 		borderColor: theme.Color(theme.Danger),
 	}
@@ -41,7 +50,7 @@ func NewConfirmationOverlay(message string) *ConfirmationOverlay {
 
 // HandleKeyPress processes a key press and updates the state
 // Returns true if the overlay should be closed
-func (c *ConfirmationOverlay) HandleKeyPress(msg tea.KeyMsg) bool {
+func (c *ConfirmationOverlay) HandleKeyPress(msg tea.KeyPressMsg) bool {
 	switch msg.String() {
 	case c.ConfirmKey:
 		c.Dismissed = true
@@ -63,20 +72,11 @@ func (c *ConfirmationOverlay) HandleKeyPress(msg tea.KeyMsg) bool {
 
 // Render renders the confirmation overlay
 func (c *ConfirmationOverlay) Render(opts ...WhitespaceOption) string {
-	style := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(c.borderColor).
-		Padding(1, 2).
-		Width(c.width)
-
-	// Add the confirmation instructions
-	content := c.message + "\n\n" +
-		"Press " + lipgloss.NewStyle().Bold(true).Render(c.ConfirmKey) + " to confirm, " +
-		lipgloss.NewStyle().Bold(true).Render(c.CancelKey) + " or " +
-		lipgloss.NewStyle().Bold(true).Render("esc") + " to cancel"
-
-	// Apply the border style and return
-	return style.Render(content)
+	// Wrapped to the inside of the frame; a long line of consequences is
+	// otherwise cut.
+	body := lipgloss.NewStyle().Width(max(c.width-6, 1)).Render(c.message)
+	footer := Keys(Key{c.ConfirmKey, c.ConfirmLabel}, Key{c.CancelKey + "/esc", c.CancelLabel})
+	return Frame(c.width, c.Title, body, footer, c.borderColor)
 }
 
 // SetWidth sets the width of the confirmation overlay
@@ -85,7 +85,7 @@ func (c *ConfirmationOverlay) SetWidth(width int) {
 }
 
 // SetBorderColor sets the border color of the confirmation overlay
-func (c *ConfirmationOverlay) SetBorderColor(color lipgloss.TerminalColor) {
+func (c *ConfirmationOverlay) SetBorderColor(color color.Color) {
 	c.borderColor = color
 }
 

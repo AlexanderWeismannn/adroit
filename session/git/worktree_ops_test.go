@@ -2,12 +2,13 @@ package git
 
 import (
 	"encoding/json"
-	"github.com/AlexanderWeismannn/adroit/log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/AlexanderWeismannn/adroit/log"
 )
 
 func TestMain(m *testing.M) {

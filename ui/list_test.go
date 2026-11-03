@@ -2,12 +2,6 @@ package ui
 
 import (
 	"fmt"
-	"github.com/AlexanderWeismannn/adroit/session"
-	"github.com/AlexanderWeismannn/adroit/session/ci"
-	"github.com/AlexanderWeismannn/adroit/session/dev"
-	"github.com/AlexanderWeismannn/adroit/session/git"
-	"github.com/AlexanderWeismannn/adroit/session/upstream"
-	"github.com/AlexanderWeismannn/adroit/theme"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -17,10 +11,16 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/mattn/go-runewidth"
-	"github.com/muesli/termenv"
+	"github.com/AlexanderWeismannn/adroit/session"
+	"github.com/AlexanderWeismannn/adroit/session/ci"
+	"github.com/AlexanderWeismannn/adroit/session/dev"
+	"github.com/AlexanderWeismannn/adroit/session/git"
+	"github.com/AlexanderWeismannn/adroit/session/upstream"
+	"github.com/AlexanderWeismannn/adroit/theme"
+
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
 )
 
@@ -188,7 +188,7 @@ func TestRenderCIBadge(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			r, inst := newTestRenderer(t, 80, "feature", tt.status)
-			require.Contains(t, branchLineOf(t, r.Render(inst, 1, false, false, false)), tt.want)
+			require.Contains(t, plain(branchLineOf(t, r.Render(inst, 1, false, false, false))), tt.want)
 		})
 	}
 }
@@ -287,7 +287,7 @@ func TestRenderCIBadgeDoesNotChangeLineWidth(t *testing.T) {
 				"width %d, state %v: badge changed the line width", width, status.State)
 			// Anchored on the glyph and its separator; the separator used to be a
 			// hyphen, which read as part of the branch name.
-			require.Contains(t, line, branchIcon+" "+runewidth.Truncate(longBranch, 3, ""),
+			require.Contains(t, line, branchIcon+" "+ansi.Truncate(longBranch, 3, ""),
 				"width %d, state %v: branch name vanished entirely", width, status.State)
 		}
 	}
@@ -298,9 +298,6 @@ func TestRenderCIBadgeDoesNotChangeLineWidth(t *testing.T) {
 // middle of the highlighted row. Guard the whole class rather than the one space:
 // on a selected row, no reset may be immediately followed by an unstyled space.
 func TestRenderSelectedRowHasNoUnstyledGaps(t *testing.T) {
-	previous := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	t.Cleanup(func() { lipgloss.SetColorProfile(previous) })
 
 	for _, status := range []ci.Status{
 		{State: ci.StateNoPR},
@@ -337,9 +334,6 @@ func TestRenderShowsTheResolvedBranch(t *testing.T) {
 // every line of the list by a column as the selection moves, which is the kind of
 // thing that looks like a rendering bug rather than a style choice.
 func TestSelectedRowMatchesUnselectedWidth(t *testing.T) {
-	previous := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	t.Cleanup(func() { lipgloss.SetColorProfile(previous) })
 
 	for _, width := range []int{20, 30, 40, 60, 80, 120} {
 		for _, status := range []ci.Status{
@@ -365,7 +359,7 @@ func TestDiffStatsAreSpaceSeparated(t *testing.T) {
 	r, inst := newTestRenderer(t, 80, "feature", ci.Status{})
 	inst.SetDiffStats(&git.DiffStats{Added: 2200, Removed: 12}, false)
 
-	line := branchLineOf(t, r.Render(inst, 1, false, false, false))
+	line := plain(branchLineOf(t, r.Render(inst, 1, false, false, false)))
 	require.Contains(t, line, "+2.2k -12")
 	require.NotContains(t, line, "+2.2k,-12")
 }
@@ -413,7 +407,8 @@ func TestListHeaderShowsTheSessionCount(t *testing.T) {
 	inst, err := session.NewInstance(session.InstanceOptions{Title: "a", Path: ".", Program: "echo"})
 	require.NoError(t, err)
 	l.AddInstance(inst)
-	require.Contains(t, l.String(), "Instances · 1")
+	require.Contains(t, l.String(), "Sessions")
+	require.Contains(t, l.String(), "1/1", "the selection's place in the bottom border")
 }
 
 // The line means something different for a session with no branch: a directory,
@@ -461,13 +456,8 @@ func mustAbs(t *testing.T, p string) string {
 // rebuild hooks registered in init actually run. Without that this whole feature
 // would configure cleanly and change nothing on screen.
 func TestThemeChangeReachesTheRenderedRow(t *testing.T) {
-	previous := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.TrueColor)
 	before := theme.Current()
-	t.Cleanup(func() {
-		theme.Set(before)
-		lipgloss.SetColorProfile(previous)
-	})
+	t.Cleanup(func() { theme.Set(before) })
 
 	r, inst := newTestRenderer(t, 80, "TASK-1", ci.Status{State: ci.StateSuccess, PRNumber: 1})
 	base := r.Render(inst, 1, true, false, false)
@@ -517,7 +507,7 @@ func TestTheFeedbackMarkerIsCountedInTheBadgeWidth(t *testing.T) {
 	quiet, _ := ciBadge(ci.Status{State: ci.StateSuccess, PRNumber: 4473}, lipgloss.NoColor{}, false)
 	noisy, _ := ciBadge(ci.Status{State: ci.StateSuccess, PRNumber: 4473, Feedback: ci.FeedbackAddressed}, lipgloss.NoColor{}, false)
 
-	require.Equal(t, runewidth.StringWidth(quiet)+2, runewidth.StringWidth(noisy),
+	require.Equal(t, ansi.StringWidth(quiet)+2, ansi.StringWidth(noisy),
 		"the marker and its leading space must be in the width the caller budgets")
 }
 
@@ -711,9 +701,6 @@ func TestTheNamingRowShowsWhatIsHappening(t *testing.T) {
 // row fell back to the terminal's own background: a dark input-box-shaped bar
 // through the middle of the highlight, and a notch out of its corner.
 func TestTheNamingRowIsStillAnUnbrokenBar(t *testing.T) {
-	previous := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	t.Cleanup(func() { lipgloss.SetColorProfile(previous) })
 	before := theme.Current()
 	t.Cleanup(func() { theme.Set(before) })
 	solarized, ok := theme.Builtin("solarized")
@@ -784,12 +771,12 @@ func TestTheListAndTheTabbedWindowStartLevel(t *testing.T) {
 	listLines := strings.Split(l.String(), "\n")
 	tabLines := strings.Split(w.String(), "\n")
 
-	titleRow := firstRow(listLines, func(s string) bool { return strings.Contains(s, "Instances") })
+	titleRow := firstRow(listLines, func(s string) bool { return strings.Contains(s, "Sessions") })
 	tabTopRow := firstRow(tabLines, func(s string) bool { return strings.Contains(s, "╭") })
 	require.Equal(t, tabTopRow, titleRow, "the list title and the tab bar must start on the same row")
 
-	// And exactly one blank row leads both, rather than two.
-	require.Equal(t, 1, titleRow, "one blank row above the title, not two")
+	// Both open on their first row: the header strip above them is the air.
+	require.Equal(t, 0, titleRow, "no blank row above the title")
 }
 
 // The headline behaviour. A session that has ended its turn with a shell still
@@ -939,9 +926,6 @@ func unbackedRunes(line string) string {
 // them: on a Solarized selected row that space showed as a dark notch in the
 // middle of the bar.
 func TestSelectedRowHasNoBackgroundGaps(t *testing.T) {
-	previous := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	t.Cleanup(func() { lipgloss.SetColorProfile(previous) })
 	before := theme.Current()
 	t.Cleanup(func() { theme.Set(before) })
 	solarized, ok := theme.Builtin("solarized")
@@ -993,13 +977,15 @@ func TestTheBranchGlyphGoesWithItsName(t *testing.T) {
 	// them sideways on whichever rows happened to have an echoed branch.
 	require.Equal(t, lipgloss.Width(named), lipgloss.Width(echoed))
 
+	// The badges follow the branch, so on the echoed row they start where the
+	// branch would have: the glyph's column stays spent, and nothing else.
 	columnOf := func(t *testing.T, out, needle string) int {
 		t.Helper()
 		line := lineContaining(t, plain(out), needle)
-		return runewidth.StringWidth(line[:strings.Index(line, needle)])
+		return ansi.StringWidth(line[:strings.Index(line, needle)])
 	}
-	require.Equal(t, columnOf(t, named, "-193"), columnOf(t, echoed, "-193"),
-		"the diff stats should not move when the glyph goes")
+	require.Equal(t, columnOf(t, named, branchIcon), columnOf(t, echoed, "+6.5k")-3,
+		"with no branch the stats take its place, one glyph and a space in")
 }
 
 // The badge is a notification, so it has to be silent in every state that asks
@@ -1048,7 +1034,7 @@ func TestSyncBadgeWidthMatchesItsPlainForm(t *testing.T) {
 		{Ref: "origin/review", Behind: 12, Ahead: 4},
 	} {
 		plain, styled := syncBadge(status, lipgloss.NoColor{}, false)
-		require.Equal(t, runewidth.StringWidth(plain), lipgloss.Width(styled))
+		require.Equal(t, ansi.StringWidth(plain), lipgloss.Width(styled))
 	}
 }
 
@@ -1056,7 +1042,7 @@ func TestSyncBadgeWidthMatchesItsPlainForm(t *testing.T) {
 // statement about the wrong commit, so the badge outlives the CI verdict as the
 // pane narrows.
 func TestNarrowRowKeepsTheSyncBadgeOverTheCIVerdict(t *testing.T) {
-	r, inst := newTestRenderer(t, 30, "a-very-long-branch-name-that-cannot-fit", ci.Status{State: ci.StateSuccess, PRNumber: 4473})
+	r, inst := newTestRenderer(t, 22, "a-very-long-branch-name-that-cannot-fit", ci.Status{State: ci.StateSuccess, PRNumber: 4473})
 	inst.SetUpstreamStatus(upstream.Status{Ref: "origin/review", Behind: 3})
 
 	line := branchLineOf(t, r.Render(inst, 1, false, false, false))
@@ -1088,7 +1074,7 @@ func TestRenderSyncBadgeDoesNotChangeLineWidth(t *testing.T) {
 				line := branchLineOf(t, r.Render(inst, 1, false, false, false))
 				require.Equal(t, baseWidth, lipgloss.Width(line),
 					"width %d, status %+v: badge changed the line width", width, status)
-				require.Contains(t, line, branchIcon+" "+runewidth.Truncate(longBranch, 3, ""),
+				require.Contains(t, line, branchIcon+" "+ansi.Truncate(longBranch, 3, ""),
 					"width %d, status %+v: branch name vanished entirely", width, status)
 			}
 		}
@@ -1126,8 +1112,8 @@ func TestTruncationSpendsTheWholeColumn(t *testing.T) {
 		out := render(t, name(n), "b")
 		if strings.Contains(out, elision) {
 			require.NotEmpty(t, fits, "no title ever fit at width %d", width)
-			require.Equal(t, runewidth.StringWidth(fits),
-				runewidth.StringWidth(strings.TrimSpace(lineContaining(t, out, elision))),
+			require.Equal(t, ansi.StringWidth(fits),
+				ansi.StringWidth(strings.TrimSpace(lineContaining(t, out, elision))),
 				"a cut title should fill the column the longest uncut one did")
 			break
 		}
@@ -1142,7 +1128,7 @@ func TestTruncationSpendsTheWholeColumn(t *testing.T) {
 		line := strings.TrimSpace(branchLineOf(t, out))
 		if strings.Contains(line, elision) {
 			require.NotEmpty(t, branchFits, "no branch ever fit at width %d", width)
-			require.Equal(t, runewidth.StringWidth(branchFits), runewidth.StringWidth(line),
+			require.Equal(t, ansi.StringWidth(branchFits), ansi.StringWidth(line),
 				"a cut branch should fill the column the longest uncut one did")
 			break
 		}
@@ -1156,9 +1142,9 @@ func TestTruncationSpendsTheWholeColumn(t *testing.T) {
 // against its edges.
 func TestASessionKeepsItsBreathingRoom(t *testing.T) {
 	r, inst := newTestRenderer(t, 80, "TASK-5901-signals", ci.Status{})
-	require.Equal(t, 4, lipgloss.Height(r.Render(inst, 1, false, false, false)),
-		"a blank, the title, the branch line, a blank")
-	require.Equal(t, 4, lipgloss.Height(r.Render(inst, 1, true, false, false)),
+	require.Equal(t, 2, lipgloss.Height(r.Render(inst, 1, false, false, false)),
+		"the title line and the branch line")
+	require.Equal(t, 2, lipgloss.Height(r.Render(inst, 1, true, false, false)),
 		"and the selected row is the same height as the rest")
 
 	// Which is what the list's own accounting has to see, or the window it picks
@@ -1175,9 +1161,9 @@ func TestASessionKeepsItsBreathingRoom(t *testing.T) {
 		t.Fatalf("no row for %q", name)
 		return -1
 	}
-	require.Equal(t, 5, rowOf("two")-rowOf("one"),
-		"five rows per session: the four it draws, plus the separator between rows")
-	require.Equal(t, 5, rowOf("three")-rowOf("two"))
+	require.Equal(t, 3, rowOf("two")-rowOf("one"),
+		"three rows per session: the two it draws, plus the separator between rows")
+	require.Equal(t, 3, rowOf("three")-rowOf("two"))
 }
 
 // With eight sessions on screen, which of them has been idle two minutes and
@@ -1191,9 +1177,10 @@ func TestAQuietRowSaysHowLongItHasBeenQuiet(t *testing.T) {
 	inst.SetActivity(session.ActivityIdle, 0)
 	inst.Acknowledge()
 
+	// The age sits at the end of the branch line, so the whole row is read.
 	at := func(d time.Duration) string {
 		r.now = func() time.Time { return time.Now().Add(d) }
-		return plain(lineContaining(t, r.Render(inst, 1, false, false, false), inst.Title))
+		return plain(r.Render(inst, 1, false, false, false))
 	}
 
 	require.NotContains(t, at(20*time.Second), "0m",
@@ -1214,14 +1201,14 @@ func TestAQuietRowSaysHowLongItHasBeenQuiet(t *testing.T) {
 	fresh.Status = session.Ready
 	r.now = func() time.Time { return time.Now().Add(72 * time.Hour) }
 	age := regexp.MustCompile(`\b\d+[mhd]\b`)
-	require.NotRegexp(t, age, plain(lineContaining(t, r.Render(fresh, 1, false, false, false), fresh.Title)),
+	require.NotRegexp(t, age, plain(r.Render(fresh, 1, false, false, false)),
 		"an unknown last-active time must not render as an age")
 }
 
 // Every branch on a ticketed repository begins the same way, so cutting the
 // tail left rows distinguishable only by counting characters.
 func TestALongNameIsCutInTheMiddle(t *testing.T) {
-	r, inst := newTestRenderer(t, 46, "b", ci.Status{})
+	r, inst := newTestRenderer(t, 40, "b", ci.Status{})
 	require.NoError(t, inst.SetTitle("TASK-5901-signals-dedup-summary-key-rework"))
 
 	line := plain(lineContaining(t, r.Render(inst, 1, false, false, false), elision))
@@ -1365,6 +1352,11 @@ func TestSelectNextAttentionPrefersAQuestion(t *testing.T) {
 	require.False(t, l.SelectNextAttention(), "both are dealt with: the finish was seen on arrival")
 	require.NotContains(t, l.attentionSummary(), "waiting")
 	require.NotContains(t, l.attentionSummary(), "new")
+
+	insts[0].SetCIStatus(ci.Status{State: ci.StatePending, PRNumber: 1, Feedback: ci.FeedbackOutstanding})
+	require.Contains(t, l.attentionSummary(), "1 PR feedback", "a remark waiting on you is counted in the header")
+	insts[0].SetCIStatus(ci.Status{State: ci.StateMerged, PRNumber: 1, Feedback: ci.FeedbackOutstanding})
+	require.NotContains(t, l.attentionSummary(), "PR feedback", "a merged pull request is not waiting on you")
 }
 
 // A row is un-counted from its repository only if it was counted: a naming that
@@ -1415,4 +1407,69 @@ func TestBadgeWordsGiveWayOneAtATime(t *testing.T) {
 	require.NotContains(t, verdict, "approved")
 	require.Contains(t, verdict, "passed")
 	require.Less(t, len(verdict), len(review))
+}
+
+// An action in flight -- a checkout, a resume -- is shown on the row from the
+// keypress: the spinner and the word, in place of whatever state the row had,
+// and taking its room out of the title like every other mark. Without it a
+// checkout of a large worktree was seconds of a key doing nothing visible.
+func TestABusyRowSaysWhatItIsDoing(t *testing.T) {
+	r, inst := newTestRenderer(t, 80, "TASK-5823-S2S", ci.Status{})
+	inst.Status = session.Paused
+	idle := r.Render(inst, 1, false, false, false)
+	require.Contains(t, idle, strings.TrimSpace(pausedIcon))
+
+	r.busy = map[*session.Instance]string{inst: "resuming"}
+	out := r.Render(inst, 1, false, false, false)
+	require.Contains(t, out, "resuming")
+	require.Contains(t, out, r.spinner.View())
+	require.NotContains(t, out, strings.TrimSpace(pausedIcon), "the action outranks the state it is changing")
+	require.Equal(t, lipgloss.Width(idle), lipgloss.Width(out))
+
+	delete(r.busy, inst)
+	require.Contains(t, r.Render(inst, 1, false, false, false), strings.TrimSpace(pausedIcon))
+}
+
+// A list with no sessions says how to get one, in the rows that would
+// otherwise be blank, and keeps to its column.
+func TestAnEmptyListNamesTheKeysThatFillIt(t *testing.T) {
+	s := spinner.New()
+	l := NewList(&s, false)
+	l.SetSize(40, 12)
+	out := l.String()
+	require.Contains(t, out, "No sessions yet")
+	require.Contains(t, out, "new session with a prompt")
+	for _, line := range strings.Split(out, "\n") {
+		require.LessOrEqual(t, lipgloss.Width(line), 40)
+	}
+	// Narrower than the hint, it is clipped to the column rather than wrapped.
+	l.SetSize(20, 12)
+	for _, line := range strings.Split(l.String(), "\n") {
+		require.LessOrEqual(t, lipgloss.Width(line), 20)
+	}
+	require.Equal(t, 12, strings.Count(out, "\n")+1, "the body is placed to the list's height")
+}
+
+// A click lands on a row by its position in the box, which the renderer records
+// as it draws: two lines per session and a blank between, so the blank is
+// nobody's and the second line is still its session's.
+func TestRowAtFollowsTheDrawnRows(t *testing.T) {
+	l := newTestList("one", "two", "three")
+	l.SetSize(40, 20)
+	_ = l.String()
+	for y, want := range map[int]int{0: 0, 1: 0, 3: 1, 4: 1, 6: 2} {
+		got, ok := l.RowAt(y)
+		require.True(t, ok, "row %d", y)
+		require.Equal(t, want, got, "row %d", y)
+	}
+	_, ok := l.RowAt(2)
+	require.False(t, ok, "the blank between sessions is nobody's")
+	_, ok = l.RowAt(19)
+	require.False(t, ok, "below the last session")
+
+	l.SetCompact(true)
+	_ = l.String()
+	got, ok := l.RowAt(2)
+	require.True(t, ok)
+	require.Equal(t, 2, got, "one line per session in compact")
 }

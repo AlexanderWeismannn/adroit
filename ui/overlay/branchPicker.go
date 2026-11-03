@@ -1,11 +1,12 @@
 package overlay
 
 import (
-	"github.com/AlexanderWeismannn/adroit/theme"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"github.com/AlexanderWeismannn/adroit/theme"
+
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 const newBranchOption = "New branch (from HEAD)"
@@ -69,8 +70,8 @@ func (bp *BranchPicker) GetFilterVersion() uint64 {
 }
 
 // HandleKeyPress processes a key event. Returns (consumed, filterChanged).
-func (bp *BranchPicker) HandleKeyPress(msg tea.KeyMsg) (consumed bool, filterChanged bool) {
-	switch msg.Type {
+func (bp *BranchPicker) HandleKeyPress(msg tea.KeyPressMsg) (consumed bool, filterChanged bool) {
+	switch msg.Code {
 	case tea.KeyUp:
 		bp.MoveUp()
 		return true, false
@@ -85,16 +86,18 @@ func (bp *BranchPicker) HandleKeyPress(msg tea.KeyMsg) (consumed bool, filterCha
 			return true, true
 		}
 		return true, false
-	case tea.KeyRunes:
-		bp.filter += string(msg.Runes)
-		bp.filterVersion++
-		return true, true
 	case tea.KeySpace:
 		bp.filter += " "
 		bp.filterVersion++
 		return true, true
+	default:
+		if !IsTyped(msg) {
+			return false, false
+		}
+		bp.filter += msg.Text
+		bp.filterVersion++
+		return true, true
 	}
-	return false, false
 }
 
 // MoveDown moves the cursor to the next option, reporting false when it is
@@ -210,7 +213,7 @@ func (bp *BranchPicker) Render() string {
 	if bp.focused {
 		cursor := bp.filter + "█"
 		s.WriteString(bpFilterStyle.Render(" (filter: " + cursor + ")"))
-		s.WriteString(bpDimStyle.Render("   type to filter · ↑↓/tab select · enter choose · ctrl+s start"))
+		s.WriteString(bpDimStyle.Render("   filter · ↑↓ select · enter choose · ctrl+s start"))
 	} else {
 		if bp.filter != "" {
 			s.WriteString(bpDimStyle.Render(" (filter: " + bp.filter + ")"))

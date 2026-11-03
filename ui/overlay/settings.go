@@ -11,10 +11,10 @@ import (
 	"github.com/AlexanderWeismannn/adroit/secrets"
 	"github.com/AlexanderWeismannn/adroit/theme"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/reflow/truncate"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // Settings is the in-app editor for what used to need a hand-edited
@@ -138,7 +138,7 @@ func (s *Settings) HandleCheck(msg SettingsCheckMsg) {
 }
 
 // HandleKeyPress returns a command to run, and whether the overlay closed.
-func (s *Settings) HandleKeyPress(msg tea.KeyMsg, check SettingsCheck) (tea.Cmd, bool) {
+func (s *Settings) HandleKeyPress(msg tea.KeyPressMsg, check SettingsCheck) (tea.Cmd, bool) {
 	switch s.mode {
 	case modeInput:
 		return s.handleInput(msg), false
@@ -608,7 +608,7 @@ func (s *Settings) ask(prompt, initial string, secret bool, onSubmit func(string
 	ti.SetValue(initial)
 	ti.CursorEnd()
 	ti.CharLimit = 4096
-	ti.Width = 60
+	ti.SetWidth(60)
 	if secret {
 		ti.EchoMode = textinput.EchoPassword
 		ti.EchoCharacter = '•'
@@ -617,7 +617,7 @@ func (s *Settings) ask(prompt, initial string, secret bool, onSubmit func(string
 	s.input, s.inputFor, s.onSubmit, s.mode = ti, prompt, onSubmit, modeInput
 }
 
-func (s *Settings) handleInput(msg tea.KeyMsg) tea.Cmd {
+func (s *Settings) handleInput(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
 	case "esc":
 		s.mode = modeBrowse
@@ -641,7 +641,7 @@ func (s *Settings) choose(title string, options []string, onChoose func(int)) {
 	s.chooseCursor = 0
 }
 
-func (s *Settings) handleChoose(msg tea.KeyMsg) {
+func (s *Settings) handleChoose(msg tea.KeyPressMsg) {
 	switch msg.String() {
 	case "esc":
 		s.mode = modeBrowse
@@ -694,7 +694,7 @@ func (s *Settings) Render() string {
 			tabs = append(tabs, muted.Render(" "+name+" "))
 		}
 	}
-	b.WriteString(accent.Render("Settings  ") + strings.Join(tabs, subtle.Render("─┬─")))
+	b.WriteString(strings.Join(tabs, subtle.Render("─┬─")))
 	b.WriteString("\n\n")
 
 	// row draws one line. The selected one is drawn from its plain text, so the
@@ -797,8 +797,13 @@ func (s *Settings) Render() string {
 		b.WriteString("\n" + muted.Render(s.help()))
 	}
 
-	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(theme.Color(theme.Accent)).
-		Padding(1, 2).Render(fitBox(b.String(), inner, settingsBodyLines))
+	// The last line written is the help line; it is the frame's footer, taken
+	// before fitBox so that it is wrapped there rather than cut here.
+	lines := strings.Split(strings.TrimRight(b.String(), "\n"), "\n")
+	footer := strings.TrimSpace(lines[len(lines)-1])
+	body := fitBox(strings.Join(lines[:len(lines)-1], "\n")+"\n", inner, settingsBodyLines-1)
+	_ = accent
+	return Frame(width, "Settings", body, footer, theme.Color(theme.Accent))
 }
 
 // settingsBodyLines is the box's fixed height in lines of content: enough for
@@ -819,7 +824,7 @@ func fitBox(content string, width, height int) string {
 	}
 	for i, l := range lines {
 		if w := lipgloss.Width(l); w > width {
-			lines[i] = truncate.String(l, uint(width))
+			lines[i] = ansi.Truncate(l, width, "")
 		} else if w < width {
 			lines[i] = l + strings.Repeat(" ", width-w)
 		}

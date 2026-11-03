@@ -3,13 +3,14 @@ package git
 import (
 	"context"
 	"fmt"
-	"github.com/AlexanderWeismannn/adroit/cmd"
-	"github.com/AlexanderWeismannn/adroit/log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/AlexanderWeismannn/adroit/cmd"
+	"github.com/AlexanderWeismannn/adroit/log"
 )
 
 // MaxBranchSearchResults is the maximum number of branches returned by SearchBranches.

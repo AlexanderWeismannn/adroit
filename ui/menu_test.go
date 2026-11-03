@@ -1,14 +1,15 @@
 package ui
 
 import (
+	"strings"
+	"testing"
+
 	"github.com/AlexanderWeismannn/adroit/keys"
 	"github.com/AlexanderWeismannn/adroit/session"
 	"github.com/AlexanderWeismannn/adroit/session/ci"
 	"github.com/AlexanderWeismannn/adroit/session/upstream"
-	"strings"
-	"testing"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/stretchr/testify/require"
 )
 
@@ -44,9 +45,45 @@ func TestMenuOffersOpenPROnlyWithAPullRequest(t *testing.T) {
 			m.SetInstance(newMenuInstance(t, tt.status))
 
 			require.Equal(t, tt.want, hasOption(m, keys.KeyOpenPR))
-			require.Equal(t, tt.want, strings.Contains(m.String(), "open PR"))
+			// Said either way: offered in the action colour, or dim after the
+			// actions so its absence is seen to be deliberate.
+			require.Contains(t, plain(m.String()), "g PR")
+			require.Equal(t, !tt.want, isDimmed(m, keys.KeyOpenPR))
 		})
 	}
+}
+
+// A dim key is drawn only while the menu has its full width -- it is the first
+// thing to give way -- and never for a session that could never have it.
+func TestDimmedKeysGiveWayFirstAndNeverApplyToARepoSession(t *testing.T) {
+	m := NewMenu()
+	m.SetSize(200, 1)
+	m.SetInstance(newMenuInstance(t, ci.Status{}))
+	require.True(t, isDimmed(m, keys.KeyOpenPR))
+	require.True(t, isDimmed(m, keys.KeyUpdate))
+	full := plain(m.String())
+	require.Contains(t, full, "g PR")
+
+	// Abbreviated, the dim keys are gone before any real key loses its word.
+	abbreviated := m.renderAt(abbrevApp)
+	require.NotContains(t, abbreviated, "g PR")
+	require.NotContains(t, abbreviated, "update")
+	require.Contains(t, abbreviated, "push")
+
+	repo, err := session.NewInstance(session.InstanceOptions{Title: "scratch", Path: ".", Program: "echo", NoWorktree: true})
+	require.NoError(t, err)
+	m.SetInstance(repo)
+	require.Empty(t, m.Dimmed())
+	require.NotContains(t, plain(m.String()), "g PR")
+}
+
+func isDimmed(m *Menu, key keys.KeyName) bool {
+	for _, k := range m.Dimmed() {
+		if k == key {
+			return true
+		}
+	}
+	return false
 }
 
 // The CI lookup runs in the background, so a session's pull request becomes known
@@ -56,10 +93,13 @@ func TestMenuPicksUpAPullRequestFoundAfterSelection(t *testing.T) {
 	m := NewMenu()
 	m.SetSize(200, 1)
 	m.SetInstance(inst)
-	require.NotContains(t, m.String(), "open PR")
+	require.False(t, hasOption(m, keys.KeyOpenPR))
+	require.True(t, isDimmed(m, keys.KeyOpenPR))
 
 	inst.SetCIStatus(ci.Status{State: ci.StateSuccess, PRNumber: 4420})
-	require.Contains(t, m.String(), "open PR")
+	_ = plain(m.String())
+	require.True(t, hasOption(m, keys.KeyOpenPR))
+	require.False(t, isDimmed(m, keys.KeyOpenPR))
 }
 
 // The group boundaries used to be a fixed table while the options were
@@ -82,27 +122,29 @@ func TestMenuGroupsTrackTheOptions(t *testing.T) {
 			require.Equal(t, len(m.options), m.groups[len(m.groups)-1].end,
 				"withPR=%v tab=%d: groups do not cover every option", withPR, tab)
 
-			action := m.groups[m.actionGroup]
+			session, tools := m.groups[0], m.groups[1]
 			for _, k := range []keys.KeyName{keys.KeyEnter, keys.KeySubmit} {
-				require.True(t, inRange(m, k, action), "withPR=%v tab=%d: %v left the action group", withPR, tab, k)
+				require.True(t, inRange(m, k, session), "withPR=%v tab=%d: %v left the session group", withPR, tab, k)
 			}
 			if withPR {
-				require.True(t, inRange(m, keys.KeyOpenPR, action),
-					"tab=%d: the open-PR key must be an action, not a system key", tab)
+				require.True(t, inRange(m, keys.KeyOpenPR, tools),
+					"tab=%d: the open-PR key must be a tool, not an interface key", tab)
 			}
 			if tab == DiffTab {
-				require.True(t, inRange(m, keys.KeyShiftUp, action),
-					"withPR=%v: the scroll key must be an action, not a system key", withPR)
+				require.True(t, inRange(m, keys.KeyShiftUp, tools),
+					"withPR=%v: the scroll key must be a tool, not an interface key", withPR)
 			}
 		}
 	}
 }
 
+// hasOption reports whether the key is offered for real: on the bar and not
+// dim.
 func hasOption(m *Menu, want keys.KeyName) bool {
 	m.updateOptions()
 	for _, k := range m.options {
 		if k == want {
-			return true
+			return !isDimmed(m, want)
 		}
 	}
 	return false
@@ -135,7 +177,7 @@ func TestOverlayMenusNameTheirKeys(t *testing.T) {
 			m := NewMenu()
 			m.SetSize(200, 1)
 			m.SetState(tt.state)
-			rendered := m.String()
+			rendered := plain(m.String())
 			for _, want := range tt.want {
 				require.Contains(t, rendered, want)
 			}
@@ -148,27 +190,27 @@ func TestPromptMenuDoesNotClaimToSubmitAName(t *testing.T) {
 	m := NewMenu()
 	m.SetSize(200, 1)
 	m.SetState(StatePrompt)
-	require.NotContains(t, m.String(), "submit name")
+	require.NotContains(t, plain(m.String()), "submit name")
 }
 
 // A session running in the repo itself has no branch and no worktree, so push
 // and checkout have nothing to act on. Offering them would advertise keys whose
 // only outcome is an error.
 func TestMenuHidesWorktreeActionsForARepoSession(t *testing.T) {
-	plain, err := session.NewInstance(session.InstanceOptions{
+	repoSession, err := session.NewInstance(session.InstanceOptions{
 		Title: "scratch", Path: ".", Program: "echo", NoWorktree: true,
 	})
 	require.NoError(t, err)
 
 	m := NewMenu()
 	m.SetSize(200, 1)
-	m.SetInstance(plain)
-	rendered := m.String()
+	m.SetInstance(repoSession)
+	rendered := plain(m.String())
 
 	require.NotContains(t, rendered, " push")
 	require.NotContains(t, rendered, "checkout")
 	// What it can still do.
-	require.Contains(t, rendered, "open")
+	require.Contains(t, rendered, "attach")
 	require.Contains(t, rendered, "kill")
 
 	require.False(t, hasOption(m, keys.KeySubmit))
@@ -179,7 +221,7 @@ func TestMenuHidesWorktreeActionsForARepoSession(t *testing.T) {
 	// The groups are computed from the options actually built, so dropping two
 	// must not leave a separator mid-group or colour the wrong keys.
 	require.Equal(t, len(m.options), m.groups[len(m.groups)-1].end)
-	require.True(t, inRange(m, keys.KeyEnter, m.groups[m.actionGroup]))
+	require.True(t, inRange(m, keys.KeyEnter, m.groups[0]))
 }
 
 // Resume is the one worktree-shaped action a repo session does need. It is parked
@@ -196,7 +238,7 @@ func TestMenuOffersResumeForAPausedRepoSession(t *testing.T) {
 	m := NewMenu()
 	m.SetSize(200, 1)
 	m.SetInstance(paused)
-	rendered := m.String()
+	rendered := plain(m.String())
 
 	require.True(t, hasOption(m, keys.KeyResume))
 	require.Contains(t, rendered, "resume")
@@ -205,7 +247,7 @@ func TestMenuOffersResumeForAPausedRepoSession(t *testing.T) {
 	require.False(t, hasOption(m, keys.KeyCheckout))
 
 	require.Equal(t, len(m.options), m.groups[len(m.groups)-1].end)
-	require.True(t, inRange(m, keys.KeyResume, m.groups[m.actionGroup]))
+	require.True(t, inRange(m, keys.KeyResume, m.groups[0]))
 }
 
 // The key is only worth advertising where it can do something: the menu is a
@@ -217,11 +259,11 @@ func TestMenuOffersTheDevKeyOnlyWhenAStackIsConfigured(t *testing.T) {
 	m.SetInstance(newDevMenuInstance(t, false))
 
 	require.False(t, hasOption(m, keys.KeyDev), "unconfigured, the key must not be offered")
-	require.NotContains(t, m.String(), "d run")
+	require.NotContains(t, plain(m.String()), "d dev")
 
 	m.SetDevEnabled(true)
 	require.True(t, hasOption(m, keys.KeyDev))
-	require.Contains(t, m.String(), "d run")
+	require.Contains(t, plain(m.String()), "d dev")
 }
 
 // Both shapes of session have somewhere to run: a worktree session in its
@@ -286,7 +328,7 @@ func TestMenuOffersTheStopKeyOnlyWhileAStackRuns(t *testing.T) {
 
 	m.SetDevRunning(true)
 	require.True(t, hasOption(m, keys.KeyDevStop))
-	require.Contains(t, m.String(), "x stop")
+	require.Contains(t, plain(m.String()), "x stop")
 
 	m.SetDevRunning(false)
 	require.False(t, hasOption(m, keys.KeyDevStop))
@@ -305,14 +347,14 @@ func TestMenuOffersTheStopKeyWithNoSessionsAtAll(t *testing.T) {
 
 	m.SetDevRunning(true)
 	require.True(t, hasOption(m, keys.KeyDevStop))
-	require.Contains(t, m.String(), "x stop")
+	require.Contains(t, plain(m.String()), "x stop")
 
 	// And back off again. The empty menu is built by splicing into a shared
 	// package-level slice, so an append that aliased it would leave the key in
 	// place for the rest of the process.
 	m.SetDevRunning(false)
 	require.False(t, hasOption(m, keys.KeyDevStop))
-	require.NotContains(t, m.String(), "stop dev stack")
+	require.NotContains(t, plain(m.String()), "stop dev stack")
 }
 
 // The empty menu's groups are a fixed pair, so inserting a key into it is
@@ -344,7 +386,7 @@ func TestTheMenuNeverExceedsItsWidth(t *testing.T) {
 		m.SetInstance(newDevMenuInstance(t, false))
 		m.SetSize(width, 1)
 
-		for _, line := range strings.Split(m.String(), "\n") {
+		for _, line := range strings.Split(plain(m.String()), "\n") {
 			require.LessOrEqual(t, lipgloss.Width(line), width,
 				"width %d: %q overruns", width, line)
 		}
@@ -360,12 +402,12 @@ func TestTheMenuKeepsEveryKeyAsItAbbreviates(t *testing.T) {
 	m.SetInstance(newDevMenuInstance(t, false))
 
 	m.SetSize(200, 1)
-	full := ansiCodes.ReplaceAllString(m.String(), "")
+	full := ansiCodes.ReplaceAllString(plain(m.String()), "")
 	require.Contains(t, full, "q quit", "precondition: the widest form spells everything out")
 
 	for _, width := range []int{110, 70, 50} {
 		m.SetSize(width, 1)
-		rendered := ansiCodes.ReplaceAllString(m.String(), "")
+		rendered := ansiCodes.ReplaceAllString(plain(m.String()), "")
 		for _, k := range []string{"n", "D", "p", "r", "d", "x", "t", "q"} {
 			require.Contains(t, rendered, k, "width %d dropped the %q key entirely", width, k)
 		}
@@ -380,13 +422,15 @@ func TestTheMenuGivesUpSystemDescriptionsFirst(t *testing.T) {
 	m.SetDevRunning(true)
 	m.SetInstance(newDevMenuInstance(t, false))
 
-	// One column short of what the full menu needs, whatever that happens to be:
-	// pinning a literal width would only be testing the current label lengths.
+	// One column short of what the bar needs once the dim keys have given way,
+	// whatever that happens to be: pinning a literal width would only be testing
+	// the current label lengths.
 	m.SetSize(0, 1)
-	full := lipgloss.Width(strings.TrimSpace(ansiCodes.ReplaceAllString(m.String(), "")))
-	m.SetSize(full-1, 1)
+	m.updateOptions()
+	withoutDims := lipgloss.Width(strings.TrimRight(ansiCodes.ReplaceAllString(m.renderAt(abbrevDims), ""), " "))
+	m.SetSize(withoutDims-1, 1)
 
-	rendered := ansiCodes.ReplaceAllString(m.String(), "")
+	rendered := ansiCodes.ReplaceAllString(plain(m.String()), "")
 	require.Contains(t, rendered, "p push", "an action keeps its description")
 	require.NotContains(t, rendered, "q quit", "a system key gives its description up first")
 	require.Contains(t, rendered, "q", "but the key itself stays")
@@ -419,7 +463,8 @@ func TestMenuOffersUpdateOnlyWhenBehindTheRemote(t *testing.T) {
 			m.SetInstance(inst)
 
 			require.Equal(t, tt.want, hasOption(m, keys.KeyUpdate))
-			require.Equal(t, tt.want, strings.Contains(m.String(), "update"))
+			require.Contains(t, plain(m.String()), "update")
+			require.Equal(t, !tt.want, isDimmed(m, keys.KeyUpdate))
 			require.Equal(t, len(m.options), m.groups[len(m.groups)-1].end)
 		})
 	}
@@ -451,8 +496,11 @@ func TestMenuPicksUpStalenessFoundAfterSelection(t *testing.T) {
 	m := NewMenu()
 	m.SetSize(200, 1)
 	m.SetInstance(inst)
-	require.NotContains(t, m.String(), "update")
+	require.False(t, hasOption(m, keys.KeyUpdate))
+	require.True(t, isDimmed(m, keys.KeyUpdate))
 
 	inst.SetUpstreamStatus(upstream.Status{Ref: "origin/review", Behind: 1})
-	require.Contains(t, m.String(), "update")
+	_ = plain(m.String())
+	require.True(t, hasOption(m, keys.KeyUpdate))
+	require.False(t, isDimmed(m, keys.KeyUpdate))
 }

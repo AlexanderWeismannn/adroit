@@ -2,18 +2,19 @@ package session
 
 import (
 	"fmt"
-	"github.com/AlexanderWeismannn/adroit/cmd/cmd_test"
-	"github.com/AlexanderWeismannn/adroit/config"
-	"github.com/AlexanderWeismannn/adroit/log"
-	"github.com/AlexanderWeismannn/adroit/session/git"
-	"github.com/AlexanderWeismannn/adroit/session/resume"
-	"github.com/AlexanderWeismannn/adroit/session/tmux"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/AlexanderWeismannn/adroit/cmd/cmd_test"
+	"github.com/AlexanderWeismannn/adroit/config"
+	"github.com/AlexanderWeismannn/adroit/log"
+	"github.com/AlexanderWeismannn/adroit/session/git"
+	"github.com/AlexanderWeismannn/adroit/session/resume"
+	"github.com/AlexanderWeismannn/adroit/session/tmux"
 
 	"github.com/stretchr/testify/require"
 )
@@ -67,7 +68,8 @@ func TestStartPausesInstanceWhenTmuxSessionNoLongerExists(t *testing.T) {
 func TestStartRestoresInstanceWhenTmuxSessionSurvives(t *testing.T) {
 	ptyFactory := &nullPtyFactory{t: t}
 	cmdExec := cmd_test.MockCmdExec{
-		RunFunc: func(cmd *exec.Cmd) error { return nil },
+		RunFunc:    func(cmd *exec.Cmd) error { return nil },
+		OutputFunc: paneRunning("claude"),
 	}
 
 	instance, err := NewInstance(InstanceOptions{Title: "alive", Path: t.TempDir(), Program: "claude"})
@@ -77,6 +79,94 @@ func TestStartRestoresInstanceWhenTmuxSessionSurvives(t *testing.T) {
 	require.NoError(t, instance.Start(false))
 	require.Equal(t, Running, instance.Status)
 	require.Equal(t, 1, ptyFactory.calls)
+}
+
+// paneRunning answers the tmux reads IsHusk makes as a pane whose foreground
+// process is name, with children if it is a shell -- a session doing its job.
+func paneRunning(name string) func(*exec.Cmd) ([]byte, error) {
+	return func(cmd *exec.Cmd) ([]byte, error) {
+		switch {
+		case strings.Contains(cmd.String(), "pane_current_command"):
+			return []byte("4242 " + name + "\n"), nil
+		case strings.Contains(cmd.String(), "pgrep"):
+			return []byte("4243\n"), nil
+		}
+		return nil, fmt.Errorf("unexpected command: %s", cmd)
+	}
+}
+
+// paneHusk answers them as an idle shell with nothing under it: what
+// tmux-resurrect rebuilds a saved claude session as after a reboot.
+func paneHusk(cmd *exec.Cmd) ([]byte, error) {
+	switch {
+	case strings.Contains(cmd.String(), "pane_current_command"):
+		return []byte("4242 zsh\n"), nil
+	case strings.Contains(cmd.String(), "pgrep"):
+		return nil, exec.Command("sh", "-c", "exit 1").Run()
+	}
+	return nil, fmt.Errorf("unexpected command: %s", cmd)
+}
+
+// tmux-resurrect rebuilds every saved session by name when the server comes
+// back after a reboot, and a program it cannot relaunch comes back as a bare
+// shell. Start used to adopt that husk as the session: the row read Running and
+// the preview showed a shell prompt where the conversation had been. It has to
+// be discarded and the session parked, so that r resumes the conversation the
+// way it does after any other restart.
+func TestStartDiscardsAHuskLeftByTmuxResurrect(t *testing.T) {
+	ptyFactory := &nullPtyFactory{t: t}
+	killed := false
+	cmdExec := cmd_test.MockCmdExec{
+		RunFunc: func(cmd *exec.Cmd) error {
+			if strings.Contains(cmd.String(), "kill-session") {
+				killed = true
+			}
+			return nil
+		},
+		OutputFunc: paneHusk,
+	}
+
+	instance, err := NewInstance(InstanceOptions{Title: "husk", Path: t.TempDir(), Program: "claude"})
+	require.NoError(t, err)
+	instance.SetTmuxSession(tmux.NewTmuxSessionWithDeps("husk", "claude", ptyFactory, cmdExec))
+
+	require.NoError(t, instance.Start(false))
+	require.Equal(t, Paused, instance.Status)
+	require.True(t, instance.Started(), "paused, not dead: r must be able to resume it")
+	require.True(t, killed, "the husk must go, or the resume would reattach to it")
+	require.Zero(t, ptyFactory.calls, "nothing worth attaching to")
+}
+
+// resurrect rebuilds every saved name, including sessions Adroit has since
+// killed, so a new session can find its name taken by a husk no row owns.
+// Start refused it with "tmux session already exists", and the name stayed
+// unusable until the husk was killed by hand.
+func TestNewSessionStartsOverAHuskWithItsName(t *testing.T) {
+	ptyFactory := &recordingPtyFactory{t: t}
+	husk := true
+	cmdExec := cmd_test.MockCmdExec{
+		RunFunc: func(cmd *exec.Cmd) error {
+			switch {
+			case strings.Contains(cmd.String(), "kill-session"):
+				husk = false
+			case strings.Contains(cmd.String(), "has-session") && !husk && !ptyFactory.created:
+				return fmt.Errorf("can't find session")
+			}
+			return nil
+		},
+		OutputFunc: paneHusk,
+	}
+
+	inst, err := NewInstance(InstanceOptions{
+		Title: "scratch", Path: t.TempDir(), Program: "claude", NoWorktree: true,
+	})
+	require.NoError(t, err)
+	inst.SetTmuxSession(tmux.NewTmuxSessionWithDeps("scratch", "claude", ptyFactory, cmdExec))
+
+	require.NoError(t, inst.Start(true))
+	require.Equal(t, Running, inst.Status)
+	require.NotEmpty(t, ptyFactory.cmds)
+	require.Contains(t, ptyFactory.cmds[0], "new-session")
 }
 
 // The row used to be labelled with the branch the session was created with, so a
@@ -210,6 +300,7 @@ func TestNoWorktreeSessionRefusesPauseButResumes(t *testing.T) {
 				}
 				return nil
 			},
+			OutputFunc: paneRunning("echo"),
 		}
 
 		inst, err := NewInstance(InstanceOptions{
@@ -242,6 +333,30 @@ func TestNoWorktreeSessionRefusesPauseButResumes(t *testing.T) {
 		require.Contains(t, ptyFactory.cmds[0], "new-session")
 		require.Contains(t, ptyFactory.cmds[0], repo,
 			"the session runs in the repository, not in a worktree")
+	})
+
+	t.Run("resume starts afresh over a husk", func(t *testing.T) {
+		repo := t.TempDir()
+		inst, ptyFactory := newPausedRepoSession(t, repo)
+		// has-session finds the shell resurrect left until it is killed, and
+		// then the session Resume starts in its place.
+		inst.tmuxSession = tmux.NewTmuxSessionWithDeps("scratch", "echo", ptyFactory, cmd_test.MockCmdExec{
+			RunFunc: func(cmd *exec.Cmd) error {
+				switch {
+				case strings.Contains(cmd.String(), "kill-session"):
+					ptyFactory.created = false
+				case strings.Contains(cmd.String(), "has-session") && !ptyFactory.created:
+					return fmt.Errorf("can't find session")
+				}
+				return nil
+			},
+			OutputFunc: paneHusk,
+		})
+
+		require.NoError(t, inst.Resume())
+		require.Equal(t, Running, inst.Status)
+		require.NotEmpty(t, ptyFactory.cmds)
+		require.Contains(t, ptyFactory.cmds[0], "new-session", "a husk is nothing to reattach to")
 	})
 
 	t.Run("resume reattaches when the session is somehow still there", func(t *testing.T) {
@@ -479,7 +594,10 @@ func (failingPtyFactory) Close()                            {}
 // could not be started at all until tmux was killed. Parked, it is one row to
 // resume later.
 func TestStartPausesInstanceWhenItsPtyCannotBeOpened(t *testing.T) {
-	cmdExec := cmd_test.MockCmdExec{RunFunc: func(*exec.Cmd) error { return nil }} // has-session succeeds
+	cmdExec := cmd_test.MockCmdExec{ // has-session succeeds, and the pane runs claude
+		RunFunc:    func(*exec.Cmd) error { return nil },
+		OutputFunc: paneRunning("claude"),
+	}
 	instance, err := NewInstance(InstanceOptions{Title: "no-pty", Path: t.TempDir(), Program: "claude"})
 	require.NoError(t, err)
 	instance.SetTmuxSession(tmux.NewTmuxSessionWithDeps("no-pty", "claude", failingPtyFactory{}, cmdExec))

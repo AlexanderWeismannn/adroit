@@ -1,13 +1,14 @@
 package config
 
 import (
-	"github.com/AlexanderWeismannn/adroit/log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/AlexanderWeismannn/adroit/log"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
