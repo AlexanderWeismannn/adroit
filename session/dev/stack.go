@@ -667,7 +667,7 @@ func prepareWrapper(prepare, command string) string {
 func preparingLamps(checks []config.DevCheck) []Lamp {
 	lamps := make([]Lamp, 0, len(checks))
 	for _, c := range checks {
-		lamps = append(lamps, Lamp{Name: c.Name, State: LampPending, Detail: "not launched yet"})
+		lamps = append(lamps, Lamp{Name: c.Name, State: LampPending, Detail: "waiting for the prepare step"})
 	}
 	return lamps
 }

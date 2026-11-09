@@ -115,8 +115,8 @@ func TestStackPrepareStepRunsBeforeTheClockStarts(t *testing.T) {
 	if !strings.HasPrefix(st.Phase, "preparing") {
 		t.Fatalf("phase = %q while the prepare step runs, want it to say so", st.Phase)
 	}
-	if st.Lamps[0].State != dev.LampPending || st.Lamps[0].Detail != "not launched yet" {
-		t.Fatalf("lamp = %+v while the prepare step runs, want pending and not launched yet", st.Lamps[0])
+	if st.Lamps[0].State != dev.LampPending || st.Lamps[0].Detail != "waiting for the prepare step" {
+		t.Fatalf("lamp = %+v while the prepare step runs, want pending and waiting for the prepare step", st.Lamps[0])
 	}
 	waitReady(t, s, "alpha")
 }
