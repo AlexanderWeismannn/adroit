@@ -215,6 +215,13 @@ type DevConfig struct {
 	// display, and tmux capture-pane reads a single pane, so a stack split across
 	// panes would show only a fraction of itself. Multiplex inside the command.
 	Command string `json:"command"`
+	// Prepare runs before Command, in the same pane and shell, e.g. linking or
+	// installing dependencies. While it runs the stack reads "preparing", the
+	// lamps are not probed and the ready clock has not started: a minutes-long
+	// `npm ci` there once ate the whole readiness budget while every lamp said
+	// "no response" about servers that had not even been launched. A non-zero
+	// exit stops the stack and is reported. Empty runs Command directly.
+	Prepare string `json:"prepare,omitempty"`
 	// Env is added to the inherited environment for Command.
 	Env map[string]string `json:"env,omitempty"`
 	// Checks are the readiness lamps, polled together until all pass.

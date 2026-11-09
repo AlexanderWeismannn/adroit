@@ -3,6 +3,7 @@ package dev
 import (
 	"fmt"
 	"net"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -75,6 +76,9 @@ type Stack struct {
 	phase    string
 	err      string
 	started  time.Time
+	// prepared is whether the configured Prepare step has finished
+	// successfully. Until it has, nothing is probed and started stays zero.
+	prepared bool
 	// opened latches the browser launch, so the URL opens once per start rather
 	// than on every poll after the lamps go green.
 	opened bool
@@ -212,6 +216,8 @@ func (s *Stack) Adopt(title, worktree, repoPath string) {
 	// a moment later, moving everything it had already drawn.
 	s.lamps = pendingLamps(s.cfg.Checks)
 	s.phase = "adopted a running stack"
+	// The prepare step's outcome is on disk; the next poll reads it.
+	s.prepared = false
 	// Not opened: a stack we did not start is one the user already has a window
 	// on, and stealing focus to re-open it on the first poll would be rude.
 	s.opened = true
@@ -321,8 +327,10 @@ func (s *Stack) Stop() error {
 	s.mu.Lock()
 	ts, cfg := s.tmux, s.cfg
 	s.tmux, s.title, s.worktree, s.lamps = nil, "", "", nil
-	s.phase, s.err, s.opened = "", "", false
+	s.phase, s.err, s.opened, s.prepared = "", "", false, false
+	s.started = time.Time{}
 	s.mu.Unlock()
+	_ = os.Remove(prepareMarker())
 
 	if ts == nil {
 		return nil
@@ -425,6 +433,9 @@ func (s *Stack) Start(title, worktree, repoPath string) error {
 	s.phase = "launching the stack"
 	s.mu.Unlock()
 
+	// A marker left by an earlier run would read as this run's prepare step
+	// having already finished.
+	_ = os.Remove(prepareMarker())
 	ts := tmux.NewTmuxSession(SessionName, buildCommand(cfg))
 	if err := ts.Start(worktree); err != nil {
 		err = fmt.Errorf("failed to start the dev stack: %w", err)
@@ -434,9 +445,17 @@ func (s *Stack) Start(title, worktree, repoPath string) error {
 
 	s.mu.Lock()
 	s.tmux = ts
-	s.started = time.Now()
 	s.opened = false
-	s.phase = "waiting for the stack to come up"
+	s.prepared = false
+	if hasPrepare(cfg) {
+		// The ready clock starts when the prepare step finishes, not now.
+		s.started = time.Time{}
+		s.lamps = preparingLamps(cfg.Checks)
+		s.phase = phasePreparing
+	} else {
+		s.started = time.Now()
+		s.phase = "waiting for the stack to come up"
+	}
 	s.mu.Unlock()
 
 	log.InfoLog.Printf("dev stack: started for %q in %s", title, worktree)
@@ -501,6 +520,14 @@ func (s *Stack) Poll() {
 	if Up(s.lamps) && time.Since(s.polledAt) < steadyInterval {
 		s.mu.Unlock()
 		return
+	}
+	if hasPrepare(s.cfg) && !s.prepared {
+		s.pollPrepareLocked()
+		if !s.prepared {
+			s.polledAt = time.Now()
+			s.mu.Unlock()
+			return
+		}
 	}
 	s.polling = true
 	worktree, checks := s.worktree, s.cfg.Checks
@@ -568,6 +595,83 @@ func (s *Stack) Poll() {
 	}
 }
 
+// phasePreparing is what the stack says while its prepare step runs.
+const phasePreparing = "preparing — the stack launches when this step finishes"
+
+func hasPrepare(cfg *config.DevConfig) bool {
+	return cfg != nil && strings.TrimSpace(cfg.Prepare) != ""
+}
+
+// prepareMarker is where the pane records the prepare step's exit status: absent
+// while it runs, "0" once it succeeded, the status otherwise. A file rather than
+// a scrape of the pane, whose scrollback the stack's own output pushes it out of.
+// Keyed on SessionName so a test's stack never reads the developer's.
+func prepareMarker() string {
+	return filepath.Join(os.TempDir(), "adroit-"+SessionName+".prepared")
+}
+
+// pollPrepareLocked reads the prepare step's outcome. Callers hold the mutex.
+func (s *Stack) pollPrepareLocked() {
+	path := prepareMarker()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		// Still running. Said on the lamps too, since a lamp reading "no
+		// response" is a claim about a server that has not been launched yet.
+		s.lamps = preparingLamps(s.cfg.Checks)
+		if s.err == "" {
+			s.phase = phasePreparing
+		}
+		return
+	}
+	status := strings.TrimSpace(string(b))
+	if status != "0" {
+		lamps := make([]Lamp, 0, len(s.cfg.Checks))
+		for _, c := range s.cfg.Checks {
+			lamps = append(lamps, Lamp{Name: c.Name, State: LampDown, Detail: "not launched — the prepare step failed"})
+		}
+		s.lamps = lamps
+		s.err = fmt.Sprintf("the prepare step exited with status %s; its output is in the pane", status)
+		s.phase = "failed"
+		return
+	}
+	s.prepared = true
+	s.started = time.Now()
+	if fi, err := os.Stat(path); err == nil {
+		s.started = fi.ModTime()
+	}
+	s.lamps = pendingLamps(s.cfg.Checks)
+	s.phase = "waiting for the stack to come up"
+}
+
+// prepareWrapper runs prepare, records how it ended in prepareMarker, and only
+// then runs command.
+//
+// The step runs in the pane's own shell rather than a subshell, so what it
+// exports (a PATH, a port) reaches command. The price is that an `exit` in the
+// step would end the pane and take its output with it, so an EXIT trap catches
+// that case: it records the status and parks the pane like the normal tail does.
+// The trap is cleared once the step is through, so it never fires for command.
+// Newlines rather than semicolons close each block, so a step that ends in `&`
+// or a comment still parses.
+func prepareWrapper(prepare, command string) string {
+	m := shellQuote(prepareMarker())
+	failed := `printf '%s' "$__adroit_prep" > ` + m + `; ` +
+		`printf '\n[the prepare step exited with status %s — press d to restart the stack]\n' "$__adroit_prep"`
+	return `printf '[preparing: the stack launches when this step finishes]\n'; ` +
+		`trap '__adroit_prep=$?; ` + strings.ReplaceAll(failed+`; while :; do sleep 3600; done`, `'`, `'\''`) + `' EXIT; ` +
+		"{ " + prepare + "\n}; __adroit_prep=$?; trap - EXIT; " +
+		`if [ "$__adroit_prep" -eq 0 ]; then printf 0 > ` + m + `; ` + command + "\n" +
+		`else ` + failed + `; (exit "$__adroit_prep"); fi`
+}
+
+func preparingLamps(checks []config.DevCheck) []Lamp {
+	lamps := make([]Lamp, 0, len(checks))
+	for _, c := range checks {
+		lamps = append(lamps, Lamp{Name: c.Name, State: LampPending, Detail: "not launched yet"})
+	}
+	return lamps
+}
+
 func (s *Stack) fail(err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -601,7 +705,11 @@ func buildCommand(cfg *config.DevConfig) string {
 		// would silently reach the first statement only, and nothing that matters.
 		fmt.Fprintf(&b, "export %s=%s; ", k, shellQuote(cfg.Env[k]))
 	}
-	b.WriteString(cfg.Command)
+	if hasPrepare(cfg) {
+		b.WriteString(prepareWrapper(cfg.Prepare, cfg.Command))
+	} else {
+		b.WriteString(cfg.Command)
+	}
 	return fmt.Sprintf(
 		"%s; printf '\\n[dev stack exited with status %%s — press d to restart it]\\n' \"$?\"; "+
 			"while :; do sleep 3600; done", b.String())

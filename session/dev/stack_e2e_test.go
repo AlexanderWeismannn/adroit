@@ -84,6 +84,75 @@ func TestStackStartsSwitchesAndStops(t *testing.T) {
 	}
 }
 
+// A prepare step that outlasts the ready timeout must not be charged against it:
+// the lamps describe servers that have not been launched yet, so "timed out" or
+// "no response" would be a false claim. What the step exports must reach the
+// command, since that is what prepare steps are for (a PATH, a port).
+func TestStackPrepareStepRunsBeforeTheClockStarts(t *testing.T) {
+	isolateSession(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cfg := &config.DevConfig{
+		Prepare: "sleep 3; export SERVE_PORT=39119",
+		Command: `python3 -c 'import os,socketserver,http.server;` +
+			`socketserver.TCPServer.allow_reuse_address = True;` +
+			`socketserver.TCPServer(("127.0.0.1", int(os.environ["SERVE_PORT"])),` +
+			` http.server.SimpleHTTPRequestHandler).serve_forever()'`,
+		Checks:              []config.DevCheck{{Name: "web", Type: "http", Target: "http://127.0.0.1:39119/", OwnCwd: true}},
+		ReadyTimeoutSeconds: 1,
+	}
+	s := dev.New(cfg)
+	t.Cleanup(func() { _ = s.Stop() })
+
+	if err := s.Start("alpha", home, ""); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	// Past the 1s budget, still inside the 3s prepare step.
+	time.Sleep(2 * time.Second)
+	s.Poll()
+	st := s.Snapshot()
+	if !strings.HasPrefix(st.Phase, "preparing") {
+		t.Fatalf("phase = %q while the prepare step runs, want it to say so", st.Phase)
+	}
+	if st.Lamps[0].State != dev.LampPending || st.Lamps[0].Detail != "not launched yet" {
+		t.Fatalf("lamp = %+v while the prepare step runs, want pending and not launched yet", st.Lamps[0])
+	}
+	waitReady(t, s, "alpha")
+}
+
+// A failing prepare step stops the stack and says so, rather than launching the
+// command onto a half-prepared tree or leaving the lamps pending forever.
+func TestStackPrepareStepFailureIsReported(t *testing.T) {
+	isolateSession(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	ran := filepath.Join(home, "command-ran")
+
+	cfg := &config.DevConfig{
+		Prepare:             "exit 3",
+		Command:             "touch " + ran,
+		Checks:              []config.DevCheck{{Name: "web", Type: "tcp", Target: "127.0.0.1:39120"}},
+		ReadyTimeoutSeconds: 30,
+	}
+	s := dev.New(cfg)
+	t.Cleanup(func() { _ = s.Stop() })
+
+	if err := s.Start("alpha", home, ""); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if !waitUntil(5*time.Second, func() bool { s.Poll(); return s.Snapshot().Phase == "failed" }) {
+		t.Fatalf("a failed prepare step was never reported: %+v", s.Snapshot())
+	}
+	st := s.Snapshot()
+	if !strings.Contains(st.Err, "status 3") || st.Lamps[0].State != dev.LampDown {
+		t.Fatalf("status = %+v, want the exit status named and the lamp down", st)
+	}
+	if _, err := os.Stat(ran); err == nil {
+		t.Fatal("the command ran although the prepare step failed")
+	}
+}
+
 func waitReady(t *testing.T, s *dev.Stack, title string) {
 	t.Helper()
 	deadline := time.Now().Add(25 * time.Second)
