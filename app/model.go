@@ -513,13 +513,20 @@ func (m *home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		if goneAny {
-			// Persisted so the row is still parked after a restart, and the menu
-			// re-read so it offers resume rather than attach.
+			// Persisted so the row is still parked after a restart.
 			if err := m.storage.SaveInstances(m.list.GetInstances()); err != nil {
 				log.WarningLog.Printf("could not save a session that went away: %v", err)
 			}
-			m.syncSelection()
 		}
+		// The menu, the Diff pane and the attention key hold a snapshot of the
+		// selected session, taken by syncSelection. The pane tick re-takes it only
+		// when the pane's content changes, so a session that has gone still -- a
+		// finished turn, a PR that merged, a branch that fell behind -- kept the
+		// old keys and the old diff until the cursor moved off it and back. This
+		// tick is what changed the state, so it re-takes the snapshot. Cheap: the
+		// menu is rebuilt from booleans and the Diff pane returns early unless the
+		// stats were recomputed.
+		m.syncSelection()
 		m.syncDevBadge()
 		next := tickUpdateMetadataCmd(m.planMetadata(m.snapshotActiveInstances()),
 			m.appConfig.CIStatusEnabled(), m.appConfig.UpstreamStatusEnabled(), m.devStack)

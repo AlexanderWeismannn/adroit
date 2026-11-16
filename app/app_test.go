@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/AlexanderWeismannn/adroit/config"
+	"github.com/AlexanderWeismannn/adroit/keys"
 	"github.com/AlexanderWeismannn/adroit/log"
 	"github.com/AlexanderWeismannn/adroit/session"
 	"github.com/AlexanderWeismannn/adroit/session/ci"
@@ -1202,4 +1203,37 @@ func keyText(s string) tea.KeyPressMsg {
 		return tea.KeyPressMsg{}
 	}
 	return tea.KeyPressMsg{Code: r[0], Text: s}
+}
+
+// The keys the menu offers for the selected session must follow what the
+// metadata tick learns about it, without the cursor having to move. The menu
+// reads the session once, when it is told to; it used to be told only on a
+// selection change or when the pane's content changed, so a session that had
+// gone still kept `g open PR` dim after its pull request appeared until you
+// moved off the row and back.
+func TestMetadataTickRefreshesTheSelectedSessionsKeys(t *testing.T) {
+	instance, err := session.FromInstanceData(session.InstanceData{
+		Title: "menu-follows-tick-test", Path: t.TempDir(), Status: session.Paused, Program: "claude",
+		// A branch of its own: on a repo session the key is hidden, not dimmed.
+		Worktree: session.GitWorktreeData{RepoPath: t.TempDir(), WorktreePath: t.TempDir(),
+			BranchName: "menu-follows-tick"}})
+	require.NoError(t, err)
+	// Built paused so no tmux session is needed, then made live: the tick skips
+	// paused sessions.
+	instance.Status = session.Ready
+
+	h := newDevStackHome(t, dev.New(nil), &fakeAppState{})
+	_ = h.list.AddInstance(instance)
+	h.list.SetSelectedInstance(0)
+	h.syncSelection()
+	require.Contains(t, h.menu.Dimmed(), keys.KeyOpenPR, "no pull request yet, so the key starts dim")
+
+	// The pane is unchanged (zero PaneState), which is the case that went stale.
+	_, _ = h.Update(metadataUpdateDoneMsg{results: []instanceMetaResult{{
+		instance: instance,
+		ciStatus: ci.Status{State: ci.StatePending, PRNumber: 42},
+	}}})
+
+	require.NotContains(t, h.menu.Dimmed(), keys.KeyOpenPR,
+		"the tick found a pull request; the menu still offers the key as dim")
 }
