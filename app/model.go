@@ -140,6 +140,13 @@ type home struct {
 	// newInstanceFinalizer is called when a session is being named and you press enter.
 	// It registers the new instance in the list after the instance has been started.
 	newInstanceFinalizer func()
+	// pending is the new session whose name is being typed, or whose prompt and
+	// branch are being chosen, and which has not been started yet. Everything
+	// that finishes or abandons it acts on this pointer, never on the row under
+	// the cursor: an earlier session finishing its start can move the cursor,
+	// and esc used to kill whichever row that left it on -- worktree, branch and
+	// all.
+	pending *session.Instance
 
 	// promptAfterName tracks if we should enter prompt mode after naming
 	promptAfterName bool
@@ -659,12 +666,24 @@ func (m *home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(m.instanceChanged(), m.handleNotice(notice))
 	case instanceStartedMsg:
-		// Select the instance that just started (or failed)
-		m.list.SelectInstance(msg.instance)
+		// A new session may be being named, or another screen may be open, while
+		// this one was starting. The cursor, the menu and the screen belong to
+		// that, so the start leaves them alone: moving the cursor here put the
+		// next esc -- which discards the session being named -- on this row.
+		elsewhere := m.naming || m.overlay != nil
 
 		if msg.err != nil {
-			m.list.Kill()
+			// By identity: the row under the cursor may be another session.
+			if m.removeInstance(msg.instance) {
+				if err := msg.instance.Kill(); err != nil {
+					log.ErrorLog.Printf("could not clean up a session that failed to start: %v", err)
+				}
+			}
 			return m, tea.Batch(m.handleError(msg.err), m.instanceChanged())
+		}
+
+		if !elsewhere {
+			m.list.SelectInstance(msg.instance)
 		}
 
 		// Save after successful start
@@ -675,17 +694,14 @@ func (m *home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			msg.instance.AutoYes = true
 		}
 
-		if msg.promptAfterName {
-			m.menu.SetState(ui.StatePrompt)
-			m.overlay = &promptScreen{input: m.newPromptOverlay()}
-		} else {
-			// If instance has a prompt (set from Shift+N flow), send it now
-			if msg.instance.Prompt != "" {
-				if err := msg.instance.SendPrompt(msg.instance.Prompt); err != nil {
-					log.ErrorLog.Printf("failed to send prompt: %v", err)
-				}
-				msg.instance.Prompt = ""
+		// If instance has a prompt (set from Shift+N flow), send it now
+		if msg.instance.Prompt != "" {
+			if err := msg.instance.SendPrompt(msg.instance.Prompt); err != nil {
+				log.ErrorLog.Printf("failed to send prompt: %v", err)
 			}
+			msg.instance.Prompt = ""
+		}
+		if !elsewhere {
 			m.menu.SetState(ui.StateDefault)
 			m.showHelpScreen(helpStart(msg.instance), nil)
 		}

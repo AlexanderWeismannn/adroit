@@ -86,7 +86,7 @@ func (m *home) handleKeyPress(msg tea.KeyPressMsg) (mod tea.Model, cmd tea.Cmd) 
 		if msg.String() == "ctrl+c" {
 			m.naming = false
 			m.promptAfterName = false
-			m.list.Kill()
+			m.discardPending()
 			return m, tea.Sequence(
 				tea.RequestWindowSize,
 				func() tea.Msg {
@@ -96,7 +96,12 @@ func (m *home) handleKeyPress(msg tea.KeyPressMsg) (mod tea.Model, cmd tea.Cmd) 
 			)
 		}
 
-		instance := m.list.GetInstances()[m.list.NumInstances()-1]
+		instance := m.pending
+		if instance == nil {
+			// Nothing to name: whatever opened the row has already let it go.
+			m.naming = false
+			return m, nil
+		}
 		switch msg.Code {
 		// Start the instance (enable previews etc) and go back to the main menu state.
 		case tea.KeyEnter:
@@ -113,7 +118,7 @@ func (m *home) handleKeyPress(msg tea.KeyPressMsg) (mod tea.Model, cmd tea.Cmd) 
 				m.naming = false
 				m.menu.SetState(ui.StatePrompt)
 				input := m.newPromptOverlay()
-				m.overlay = &promptScreen{input: input}
+				m.overlay = &promptScreen{input: input, target: instance}
 				// Trigger initial branch search (no debounce, version 0)
 				initialSearch := m.runBranchSearch("", input.BranchFilterVersion())
 				return m, tea.Batch(tea.RequestWindowSize, initialSearch)
@@ -122,6 +127,7 @@ func (m *home) handleKeyPress(msg tea.KeyPressMsg) (mod tea.Model, cmd tea.Cmd) 
 			// Set Loading status and finalize into the list immediately
 			instance.SetStatus(session.Loading)
 			m.newInstanceFinalizer()
+			m.pending = nil
 			m.promptAfterName = false
 			m.naming = false
 			m.menu.SetState(ui.StateDefault)
@@ -129,11 +135,7 @@ func (m *home) handleKeyPress(msg tea.KeyPressMsg) (mod tea.Model, cmd tea.Cmd) 
 			// Return a tea.Cmd that runs instance.Start in the background
 			startCmd := func() tea.Msg {
 				err := instance.Start(true)
-				return instanceStartedMsg{
-					instance:        instance,
-					err:             err,
-					promptAfterName: false,
-				}
+				return instanceStartedMsg{instance: instance, err: err}
 			}
 
 			return m, tea.Batch(tea.RequestWindowSize, m.instanceChanged(), startCmd)
@@ -179,7 +181,7 @@ func (m *home) handleKeyPress(msg tea.KeyPressMsg) (mod tea.Model, cmd tea.Cmd) 
 			m.naming = false
 			m.menu.SetState(ui.StatePrompt)
 			input := m.newBranchOverlay()
-			m.overlay = &promptScreen{input: input}
+			m.overlay = &promptScreen{input: input, target: instance}
 			version := input.BranchFilterVersion()
 			initialSearch := m.runBranchSearch("", version)
 			// Fetch as N does, then search again: this path listed only the
@@ -194,7 +196,7 @@ func (m *home) handleKeyPress(msg tea.KeyPressMsg) (mod tea.Model, cmd tea.Cmd) 
 			}, m.runBranchSearch("", version))
 			return m, tea.Batch(tea.RequestWindowSize, initialSearch, refreshed)
 		case tea.KeyEscape:
-			m.list.Kill()
+			m.discardPending()
 			m.naming = false
 			m.instanceChanged()
 
@@ -267,7 +269,10 @@ func (m *home) handleKeyPress(msg tea.KeyPressMsg) (mod tea.Model, cmd tea.Cmd) 
 			return m, nil
 		}
 		m.menu.SetState(ui.StatePrompt)
-		m.overlay = &promptScreen{input: overlay.NewTextInputOverlay(fmt.Sprintf("Send to %s", selected.Title), "")}
+		m.overlay = &promptScreen{
+			input:  overlay.NewTextInputOverlay(fmt.Sprintf("Send to %s", selected.Title), ""),
+			target: selected,
+		}
 		return m, tea.RequestWindowSize
 	case keys.KeyHelp:
 		return m.showHelpScreen(helpTypeGeneral{}, nil)
@@ -294,6 +299,7 @@ func (m *home) handleKeyPress(msg tea.KeyPressMsg) (mod tea.Model, cmd tea.Cmd) 
 		}
 
 		m.newInstanceFinalizer = m.list.AddInstance(instance)
+		m.pending = instance
 		m.list.SetSelectedInstance(m.list.NumInstances() - 1)
 		m.naming = true
 		m.menu.SetState(ui.StateNewInstance)
@@ -315,6 +321,7 @@ func (m *home) handleKeyPress(msg tea.KeyPressMsg) (mod tea.Model, cmd tea.Cmd) 
 		}
 
 		m.newInstanceFinalizer = m.list.AddInstance(instance)
+		m.pending = instance
 		m.list.SetSelectedInstance(m.list.NumInstances() - 1)
 		m.naming = true
 		m.menu.SetState(ui.StateNewInstance)

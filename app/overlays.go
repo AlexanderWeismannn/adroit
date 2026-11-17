@@ -48,6 +48,11 @@ func (m *home) menuToDefault() tea.Cmd {
 // picker reached by tab from the name, or `i` sending to a running session.
 type promptScreen struct {
 	input *overlay.TextInputOverlay
+	// target is the session the prompt is for: the new one being created, or
+	// the running one `i` was pressed on. Fixed when the screen opens, because
+	// the cursor is not: a start finishing behind the overlay can move it, and
+	// a submit read from the cursor then sent this prompt to another session.
+	target *session.Instance
 }
 
 // promptInput is the open prompt's input, or nil when no prompt is open. The
@@ -71,7 +76,7 @@ func (s *promptScreen) render(m *home) string { return s.input.Render() }
 func (s *promptScreen) handleKey(m *home, msg tea.KeyPressMsg) tea.Cmd {
 	// Handle cancel via ctrl+c before delegating to the overlay
 	if msg.String() == "ctrl+c" {
-		return m.cancelPromptOverlay()
+		return m.cancelPromptOverlay(s.target)
 	}
 
 	// Use the new TextInputOverlay component to handle all key events
@@ -79,9 +84,10 @@ func (s *promptScreen) handleKey(m *home, msg tea.KeyPressMsg) tea.Cmd {
 
 	// Check if the form was submitted or canceled
 	if shouldClose {
-		selected := m.list.GetSelectedInstance()
+		selected := s.target
 		if selected == nil {
-			return nil
+			m.overlay = nil
+			return m.menuToDefault()
 		}
 
 		if s.input.IsCanceled() {
@@ -95,7 +101,7 @@ func (s *promptScreen) handleKey(m *home, msg tea.KeyPressMsg) tea.Cmd {
 				m.syncNaming(true)
 				return tea.RequestWindowSize
 			}
-			return m.cancelPromptOverlay()
+			return m.cancelPromptOverlay(selected)
 		}
 		m.branchFromNaming = false
 
@@ -144,16 +150,16 @@ func (s *promptScreen) handleKey(m *home, msg tea.KeyPressMsg) tea.Cmd {
 				// Finalize into list and start
 				selected.SetStatus(session.Loading)
 				m.newInstanceFinalizer()
+				m.pending = nil
 				m.overlay = nil
 				m.menu.SetState(ui.StateDefault)
 
 				startCmd := func() tea.Msg {
 					err := selected.Start(true)
 					return instanceStartedMsg{
-						instance:        selected,
-						err:             err,
-						promptAfterName: false,
-						selectedBranch:  selectedBranch,
+						instance:       selected,
+						err:            err,
+						selectedBranch: selectedBranch,
 					}
 				}
 
@@ -213,12 +219,12 @@ func (m *home) newBranchOverlay() *overlay.TextInputOverlay {
 	return o
 }
 
-// cancelPromptOverlay cancels the prompt overlay, cleaning up unstarted instances.
-func (m *home) cancelPromptOverlay() tea.Cmd {
+// cancelPromptOverlay cancels the prompt overlay, abandoning the new session it
+// was for. A running session the prompt was to be sent to is left alone.
+func (m *home) cancelPromptOverlay(target *session.Instance) tea.Cmd {
 	m.branchFromNaming = false
-	selected := m.list.GetSelectedInstance()
-	if selected != nil && !selected.Started() {
-		m.list.Kill()
+	if target != nil && target == m.pending {
+		m.discardPending()
 	}
 	m.overlay = nil
 	return m.menuToDefault()

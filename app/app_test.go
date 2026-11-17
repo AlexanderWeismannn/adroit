@@ -1237,3 +1237,67 @@ func TestMetadataTickRefreshesTheSelectedSessionsKeys(t *testing.T) {
 	require.NotContains(t, h.menu.Dimmed(), keys.KeyOpenPR,
 		"the tick found a pull request; the menu still offers the key as dim")
 }
+
+// A session finishing its start while the next one is being named must not take
+// the cursor. Esc and ctrl+c abandon the session being named, and they used to
+// do it by killing the selected row -- which the start had just moved to the
+// session that started, so its worktree and branch went instead. The prompt
+// overlay of N had the same fault: its submit and its cancel read the cursor.
+func TestAStartFinishingWhileNamingLeavesTheNewSessionAlone(t *testing.T) {
+	dir, err := os.MkdirTemp("/tmp", "atmx")
+	require.NoError(t, err)
+	t.Setenv("TMUX_TMPDIR", dir)
+	t.Setenv("TMUX", "")
+	t.Cleanup(func() {
+		_ = exec.Command("tmux", "kill-server").Run()
+		_ = os.RemoveAll(dir)
+	})
+
+	for _, tc := range []struct {
+		name string
+		// open starts naming a new session, and abandon gives it up.
+		open, abandon []tea.KeyPressMsg
+	}{
+		{"esc while naming", []tea.KeyPressMsg{keyText("n"), keyText("b")},
+			[]tea.KeyPressMsg{{Code: tea.KeyEscape}}},
+		{"ctrl+c while naming", []tea.KeyPressMsg{keyText("n"), keyText("b")},
+			[]tea.KeyPressMsg{{Code: 'c', Mod: tea.ModCtrl}}},
+		{"esc in the N prompt", []tea.KeyPressMsg{keyText("N"), keyText("b"), {Code: tea.KeyEnter}},
+			[]tea.KeyPressMsg{{Code: tea.KeyEscape}}},
+		{"ctrl+c in the N prompt", []tea.KeyPressMsg{keyText("N"), keyText("b"), {Code: tea.KeyEnter}},
+			[]tea.KeyPressMsg{{Code: 'c', Mod: tea.ModCtrl}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			storageState := &fakeInstanceStorage{instances: json.RawMessage("[]")}
+			storage, err := session.NewStorage(storageState)
+			require.NoError(t, err)
+			h := newDevStackHome(t, dev.New(nil), &fakeAppState{helpSeen: ^uint32(0)})
+			h.storage = storage
+
+			// A, as its start leaves it: started, in the list, not the row being named.
+			started, err := session.FromInstanceData(session.InstanceData{
+				Title: "started-while-naming", Path: t.TempDir(), Status: session.Paused,
+				NoWorktree: true, Program: "claude"})
+			require.NoError(t, err)
+			h.list.AddInstance(started)()
+
+			press := func(msg tea.KeyPressMsg) { h.keySent = true; h.handleKeyPress(msg) }
+			for _, k := range tc.open {
+				press(k)
+			}
+			pending := h.list.GetSelectedInstance()
+			require.NotSame(t, started, pending)
+			require.False(t, pending.Started())
+
+			_, _ = h.Update(instanceStartedMsg{instance: started})
+			assert.Same(t, pending, h.list.GetSelectedInstance(),
+				"the start moved the cursor off the session being named")
+
+			for _, k := range tc.abandon {
+				press(k)
+			}
+			require.Equal(t, []*session.Instance{started}, h.list.GetInstances(),
+				"abandoning the new session must leave the started one, and only it")
+		})
+	}
+}

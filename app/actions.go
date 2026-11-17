@@ -146,11 +146,47 @@ func (m *home) syncNaming(on bool) {
 		return
 	}
 	title := ""
-	if n := m.list.NumInstances(); n > 0 {
-		title = m.list.GetInstances()[n-1].Title
+	if m.pending != nil {
+		title = m.pending.Title
 	}
 	m.list.SetNaming(true, git.PreviewBranchName(
 		m.appConfig.BranchPrefixFor(m.namingRepo), m.appConfig.PreserveBranchCaseFor(m.namingRepo), title))
+}
+
+// removeInstance takes target out of the list, wherever it is, and leaves the
+// cursor on the row it was on -- or on the neighbour, when target was that row.
+// It reports whether target was in the list at all.
+//
+// Everything that drops a particular session goes through here rather than
+// through the row under the cursor. The cursor is not a reliable name for a
+// session: work finishing off the loop selects things, and an esc that meant
+// "abandon the session I am naming" used to kill whichever session that left
+// selected.
+func (m *home) removeInstance(target *session.Instance) bool {
+	if target == nil {
+		return false
+	}
+	prev := m.list.GetSelectedInstance()
+	m.list.SelectInstance(target)
+	if m.list.GetSelectedInstance() != target {
+		return false
+	}
+	m.list.Remove()
+	if prev != nil && prev != target {
+		m.list.SelectInstance(prev)
+	}
+	return true
+}
+
+// discardPending abandons the new session being named or prompted for. It has
+// not been started, so there is nothing of it outside the list to tear down.
+func (m *home) discardPending() {
+	pending := m.pending
+	m.pending = nil
+	if pending == nil || pending.Started() {
+		return
+	}
+	m.removeInstance(pending)
 }
 
 func (m *home) instanceChanged() tea.Cmd {
@@ -395,18 +431,12 @@ func runUpdateCmd(msg runUpdateMsg) tea.Cmd {
 // session disappears immediately, and its remains are cleared up behind it.
 func (m *home) killApproved(instance *session.Instance) tea.Cmd {
 	// Removed before anything else, so the list is right even if a later step
-	// fails. Remove hands back the instance it dropped rather than leaving us to
-	// look it up again from a selection that has already moved on.
-	removed := m.list.Remove()
-	if removed == nil {
+	// fails. By identity, not by the cursor: the checks ran off the loop, and the
+	// cursor is free to move -- or be moved by a start finishing -- meanwhile.
+	if !m.removeInstance(instance) {
 		return nil
 	}
-	if removed.Title != instance.Title {
-		// The selection cannot move while the confirmation is up, so this should be
-		// unreachable; tear down what was actually removed if it ever is not.
-		log.WarningLog.Printf("kill confirmed for %q but %q was selected; removing %q",
-			instance.Title, removed.Title, removed.Title)
-	}
+	removed := instance
 	title := removed.Title
 
 	// Before anything is torn down: what makes this session restorable is its
