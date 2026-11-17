@@ -360,7 +360,7 @@ func TestDiffStatsAreSpaceSeparated(t *testing.T) {
 	inst.SetDiffStats(&git.DiffStats{Added: 2200, Removed: 12}, false)
 
 	line := plain(branchLineOf(t, r.Render(inst, 1, false, false, false)))
-	require.Contains(t, line, "+2.2k -12")
+	require.Contains(t, line, "+2.2k −12")
 	require.NotContains(t, line, "+2.2k,-12")
 }
 
@@ -1013,15 +1013,15 @@ func TestTheBranchGlyphGoesWithItsName(t *testing.T) {
 	// them sideways on whichever rows happened to have an echoed branch.
 	require.Equal(t, lipgloss.Width(named), lipgloss.Width(echoed))
 
-	// The badges follow the branch, so on the echoed row they start where the
-	// branch would have: the glyph's column stays spent, and nothing else.
+	// The stats are right-aligned in their own column, so they line up on both
+	// rows whatever the branch line holds.
 	columnOf := func(t *testing.T, out, needle string) int {
 		t.Helper()
 		line := lineContaining(t, plain(out), needle)
 		return ansi.StringWidth(line[:strings.Index(line, needle)])
 	}
-	require.Equal(t, columnOf(t, named, branchIcon), columnOf(t, echoed, "+6.5k")-3,
-		"with no branch the stats take its place, one glyph and a space in")
+	require.Equal(t, columnOf(t, named, "+6.5k"), columnOf(t, echoed, "+6.5k"),
+		"the stats sit in the same column with or without a branch name")
 }
 
 // The badge is a notification, so it has to be silent in every state that asks
@@ -1301,8 +1301,8 @@ func TestBadgesSpellThemselvesOutWhenThereIsRoom(t *testing.T) {
 	narrow.setWidth(44)
 	line = plain(branchLineOf(t, narrow.Render(inst, 1, false, false, false)))
 	require.Contains(t, line, "feature", "the branch name outranks the words")
-	require.Contains(t, line, ciFailureIcon+" #4559", "the marks themselves stay")
-	require.NotContains(t, line, "failed")
+	require.Contains(t, line, ciFailureIcon+" failed", "the most urgent words are the last to go")
+	require.NotContains(t, line, "#4559", "the number goes before any word")
 	require.NotContains(t, line, "diverged")
 }
 
@@ -1431,18 +1431,37 @@ func TestMergedSessionIsNotReadyForYou(t *testing.T) {
 	require.Contains(t, r.Render(inst, 1, false, false, false), strings.TrimSpace(readyIcon))
 }
 
-// Words give way one at a time, least useful first.
-func TestBadgeWordsGiveWayOneAtATime(t *testing.T) {
-	status := ci.Status{State: ci.StateSuccess, PRNumber: 4773, Review: ci.ReviewApproved, Feedback: ci.FeedbackOutstanding}
-	all, _ := ciBadgeAt(status, lipgloss.NoColor{}, badgeWordsAll)
-	review, _ := ciBadgeAt(status, lipgloss.NoColor{}, badgeWordsReview)
-	verdict, _ := ciBadgeAt(status, lipgloss.NoColor{}, badgeWordsVerdict)
-	require.Contains(t, all, "comments")
-	require.NotContains(t, review, "comments")
-	require.Contains(t, review, "approved")
-	require.NotContains(t, verdict, "approved")
-	require.Contains(t, verdict, "passed")
-	require.Less(t, len(verdict), len(review))
+// Words go by urgency. They used to give way in a fixed order, verdict last, so
+// in the 34 columns a split list's row gets, the row with a failed build and
+// changes requested lost every word ("↓3 ✗ #5503 ✎ ❞") while a passing row kept
+// "passed". The number goes first now, then the calm words; "failed" and
+// "changes" are the last to go, and outlast the row's diff stat.
+func TestBadgeWordsGoByUrgency(t *testing.T) {
+	urgent := ci.Status{State: ci.StateFailure, PRNumber: 5503, Review: ci.ReviewChangesRequested, Feedback: ci.FeedbackOutstanding}
+	r, inst := newTestRenderer(t, 34, "x", urgent)
+	inst.Title = "TASK-6572-ews"
+	inst.Branch = "TASK-6572-ews"
+	inst.SetUpstreamStatus(upstream.Status{Ref: "origin/x", Behind: 3, FetchedAt: time.Now()})
+	inst.SetDiffStats(&git.DiffStats{Added: 412, Removed: 98, Content: "x"}, true)
+	line := plain(strings.Split(r.Render(inst, 1, false, false, false), "\n")[1])
+	require.Contains(t, line, "failed", "%q", line)
+	require.Contains(t, line, "changes", "%q", line)
+	require.NotContains(t, line, "#5503", "the number goes before any word: %q", line)
+
+	// With room for everything, nothing is dropped.
+	r.setWidth(100)
+	line = plain(strings.Split(r.Render(inst, 1, false, false, false), "\n")[1])
+	for _, want := range []string{"behind", "#5503", "failed", "changes", "comments", "+412"} {
+		require.Contains(t, line, want, "%q", line)
+	}
+}
+
+// A row with no change has no stat: "+0 −0" on every quiet row was noise in
+// the column the eye runs down for change.
+func TestAnEmptyDiffShowsNoStat(t *testing.T) {
+	r, inst := newTestRenderer(t, 60, "TASK-1", ci.Status{})
+	inst.SetDiffStats(&git.DiffStats{Content: "x"}, true)
+	require.NotContains(t, plain(r.Render(inst, 1, false, false, false)), "+0")
 }
 
 // An action in flight -- a checkout, a resume -- is shown on the row from the

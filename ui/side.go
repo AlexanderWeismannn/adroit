@@ -9,6 +9,7 @@ import (
 	"github.com/AlexanderWeismannn/adroit/session"
 	"github.com/AlexanderWeismannn/adroit/session/ci"
 	"github.com/AlexanderWeismannn/adroit/session/dev"
+	"github.com/AlexanderWeismannn/adroit/session/upstream"
 	"github.com/AlexanderWeismannn/adroit/theme"
 )
 
@@ -132,7 +133,8 @@ func (s *Side) lines() []string {
 	st := i.GetCIStatus()
 	if st.State != ci.StateNoPR && st.PRNumber > 0 {
 		pr := []string{heading("Pull request", "")}
-		plain, styled := ciBadgeAt(st, lipgloss.NoColor{}, badgeWordsAll)
+		// Without the number: the line already leads with it.
+		plain, styled := renderBadges(rowBadges(st, upstream.Status{}), lipgloss.NoColor{}, false, rankHistory)
 		if plain != "" {
 			pr = append(pr, fact(sideTextStyle.Render(fmt.Sprintf("#%d", st.PRNumber))+" · "+styled))
 		}
