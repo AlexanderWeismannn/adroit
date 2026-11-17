@@ -823,11 +823,11 @@ func (r *InstanceRenderer) stateGlyph(i *session.Instance, beingNamed, selected 
 	}
 
 	switch {
-	case i.Status == session.Paused:
+	case i.GetStatus() == session.Paused:
 		return paint(pausedStyle, pausedIcon)
 	// Loading is the interface rebuilding the session, not the agent working, but
 	// it is still something in flight -- so it spins, in the accent.
-	case i.Status == session.Loading:
+	case i.GetStatus() == session.Loading:
 		return spin(workingStyle)
 	}
 
@@ -848,7 +848,7 @@ func (r *InstanceRenderer) stateGlyph(i *session.Instance, beingNamed, selected 
 	// Activity is only read off interfaces we can parse. For every other program
 	// the pane-content hash still drives Status, so Running there is all we know
 	// and it still means the spinner.
-	if i.Status == session.Running {
+	if i.GetStatus() == session.Running {
 		return spin(workingStyle)
 	}
 
@@ -866,7 +866,7 @@ func (r *InstanceRenderer) stateGlyph(i *session.Instance, beingNamed, selected 
 	// The ready dot means "your turn". On a session whose pull request is
 	// already merged or closed there is no turn to take -- the only thing left
 	// to do with it is kill it -- so it carries the nothing-to-do mark instead.
-	if i.Status == session.Ready && !prSettled(i) {
+	if i.GetStatus() == session.Ready && !prSettled(i) {
 		return paint(readyStyle, readyIcon)
 	}
 	if !i.Started() {
@@ -1016,7 +1016,7 @@ func prSettled(i *session.Instance) bool {
 // settled reports whether a session's work is over for now: its pull request
 // is merged or closed, or it is parked. Such a row is drawn muted.
 func settled(i *session.Instance) bool {
-	return i.Status == session.Paused || prSettled(i)
+	return i.GetStatus() == session.Paused || prSettled(i)
 }
 
 func (r *InstanceRenderer) Render(i *session.Instance, idx int, selected bool, hasMultipleRepos bool, isLast bool) string {
@@ -1150,7 +1150,7 @@ func (r *InstanceRenderer) Render(i *session.Instance, idx int, selected bool, h
 	// says where it stands.
 	pendingBranch := false
 	if !beingNamed && branch == "" && !branchIsEcho && !i.Started() && !i.Paused() &&
-		i.Status != session.Paused && !i.NoWorktree() {
+		i.GetStatus() != session.Paused && !i.NoWorktree() {
 		preview := git.PreviewBranchName(r.branchPrefix, r.preserveBranchCase, i.Title)
 		// An echo is no more worth showing here than it is on a started session.
 		if preview != "" && !branchEchoesTitle(preview, i.Title) {
@@ -1292,7 +1292,7 @@ const ageColumn = 3
 // ageText is how long a row has been quiet, for its age column: "" while it is
 // busy or under a minute quiet.
 func (r *InstanceRenderer) ageText(i *session.Instance, beingNamed bool) string {
-	if beingNamed || i.Status == session.Loading || i.Status == session.Running {
+	if beingNamed || i.GetStatus() == session.Loading || i.GetStatus() == session.Running {
 		return ""
 	}
 	switch i.GetActivity() {
@@ -1595,7 +1595,7 @@ func (l *List) AttentionCount() int {
 func (l *List) wantsAttention(idx int) int {
 	inst := l.items[idx]
 	switch {
-	case inst.Status == session.Paused:
+	case inst.GetStatus() == session.Paused:
 		return 0
 	case inst.GetActivity() == session.ActivityNeedsInput:
 		return 2
@@ -1613,7 +1613,7 @@ func (l *List) attentionSummary() string {
 	for idx, inst := range l.items {
 		// Counted apart from the switch below: a pull request waiting on your
 		// answer is independent of what the agent in its session is doing.
-		if inst.Status != session.Paused && hasOutstandingFeedback(inst.GetCIStatus()) {
+		if inst.GetStatus() != session.Paused && hasOutstandingFeedback(inst.GetCIStatus()) {
 			remarks++
 		}
 		switch l.wantsAttention(idx) {
@@ -1624,11 +1624,11 @@ func (l *List) attentionSummary() string {
 			unseen++
 			continue
 		}
-		if inst.Status == session.Paused {
+		if inst.GetStatus() == session.Paused {
 			continue
 		}
 		if a := inst.GetActivity(); a == session.ActivityWorking || a == session.ActivityShell ||
-			inst.Status == session.Running || inst.Status == session.Loading {
+			inst.GetStatus() == session.Running || inst.GetStatus() == session.Loading {
 			working++
 		}
 	}

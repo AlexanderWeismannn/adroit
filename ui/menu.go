@@ -183,8 +183,8 @@ func (m *Menu) ctx() keys.Ctx {
 		return c
 	}
 	c.HasInstance = true
-	c.Loading = m.instance.Status == session.Loading
-	c.Paused = m.instance.Status == session.Paused
+	c.Loading = m.instance.GetStatus() == session.Loading
+	c.Paused = m.instance.GetStatus() == session.Paused
 	c.Started = m.instance.Started()
 	c.NoWorktree = m.instance.NoWorktree()
 	st := m.instance.GetCIStatus().State
@@ -258,7 +258,7 @@ func (m *Menu) canOpenPR() bool {
 // repository itself shares the user's own checkout, and moving that under them
 // from here is not this key's business.
 func (m *Menu) canUpdate() bool {
-	if m.instance == nil || m.instance.NoWorktree() || m.instance.Status == session.Paused {
+	if m.instance == nil || m.instance.NoWorktree() || m.instance.GetStatus() == session.Paused {
 		return false
 	}
 	return m.instance.GetUpstreamStatus().Stale()

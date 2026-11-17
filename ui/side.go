@@ -185,10 +185,10 @@ func (s *Side) lines() []string {
 	agent := []string{heading("Agent", "")}
 	state, stateStyle := "not started", sideMutedStyle
 	switch {
-	case i.Status == session.Paused:
+	case i.GetStatus() == session.Paused:
 		// The word the legend and the window footer use for the same state.
 		state = "paused"
-	case i.Status == session.Loading:
+	case i.GetStatus() == session.Loading:
 		state = "starting"
 	case i.GetActivity() == session.ActivityNeedsInput:
 		// The one state here that is asking you for something: in the colour of
@@ -202,7 +202,7 @@ func (s *Side) lines() []string {
 		state = "ready"
 	}
 	line := sideTextStyle.Render(i.Program) + sideMutedStyle.Render(" · ") + stateStyle.Render(state)
-	if Diagnostics && s.paneRate > 0 && i.Started() && i.Status != session.Paused {
+	if Diagnostics && s.paneRate > 0 && i.Started() && i.GetStatus() != session.Paused {
 		line += sideMutedStyle.Render(fmt.Sprintf(" · %g/s", s.paneRate))
 	}
 	agent = append(agent, fact(line))

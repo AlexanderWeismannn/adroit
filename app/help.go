@@ -133,7 +133,7 @@ func (h helpTypeInstanceStart) toContent(width int) string {
 	content := lipgloss.JoinVertical(lipgloss.Left,
 		descStyle.Render("New session created:"),
 		descStyle.Render(fmt.Sprintf("• Git branch: %s (isolated worktree)",
-			lipgloss.NewStyle().Bold(true).Render(h.instance.Branch))),
+			lipgloss.NewStyle().Bold(true).Render(h.instance.GetBranch()))),
 		descStyle.Render(fmt.Sprintf("• %s running in background tmux session",
 			lipgloss.NewStyle().Bold(true).Render(h.instance.Program))),
 		"",

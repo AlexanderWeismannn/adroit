@@ -96,7 +96,7 @@ func (m *home) paneSampler() (tab int, sample paneSampler) {
 	tab = m.tabbedWindow.GetActiveTab()
 	switch tab {
 	case ui.PreviewTab:
-		if selected == nil || !selected.Started() || selected.Status == session.Paused ||
+		if selected == nil || !selected.Started() || selected.GetStatus() == session.Paused ||
 			m.tabbedWindow.IsPreviewInScrollMode() {
 			return tab, nil
 		}
@@ -104,7 +104,7 @@ func (m *home) paneSampler() (tab int, sample paneSampler) {
 			// Re-checked at sample time: a checkout that lands while the tick
 			// sleeps turns Preview into an empty string, and reporting that
 			// would blank the paused notice UpdateContent has just drawn.
-			if !selected.Started() || selected.Status == session.Paused {
+			if !selected.Started() || selected.GetStatus() == session.Paused {
 				return paneSample{}, false, nil
 			}
 			content, err := selected.Preview()
@@ -204,7 +204,7 @@ func (m *home) applyPaneTick(msg paneTickMsg) tea.Cmd {
 	case ui.PreviewTab:
 		// The same guard on arrival: the session may have been parked between
 		// the sample and now.
-		if !msg.instance.Started() || msg.instance.Status == session.Paused {
+		if !msg.instance.Started() || msg.instance.GetStatus() == session.Paused {
 			return nil
 		}
 		m.tabbedWindow.ApplyPreviewCapture(msg.instance, msg.content)

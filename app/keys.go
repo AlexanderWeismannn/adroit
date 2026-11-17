@@ -237,8 +237,8 @@ func (m *home) handleKeyPress(msg tea.KeyPressMsg) (mod tea.Model, cmd tea.Cmd) 
 	}
 	m.quitArmed = false
 
-	// 1-9 select the row wearing that number. Not in the key map: nine bindings
-	// for one action would crowd the menu, and the numbers are already on screen.
+	// 1-9 select the session at that position in the list. Not in the key map:
+	// nine bindings for one action would crowd the menu; the help card names them.
 	if k := msg.String(); len(k) == 1 && k[0] >= '1' && k[0] <= '9' {
 		if idx := int(k[0] - '1'); idx < m.list.NumInstances() {
 			m.list.SetSelectedInstance(idx)
