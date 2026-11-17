@@ -3,7 +3,6 @@ package ui
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/AlexanderWeismannn/adroit/session"
 	"github.com/AlexanderWeismannn/adroit/theme"
@@ -27,16 +26,20 @@ type DiffPane struct {
 	width    int
 	height   int
 
-	// srcInstance and srcAt identify the diff the pane has already colourised.
+	// srcInstance, srcContent and srcAdded/srcRemoved identify the diff the pane
+	// has already colourised.
 	//
-	// SetDiff runs on every preview tick, and colourising is a per-line restyle
-	// of the whole diff plus a join of the result: measured at 2.4ms and 1.7MB
-	// allocated for a 200KB diff, which at ten ticks a second was 17MB/s of
-	// garbage to redraw something that had not changed. The instance stamps its
-	// stats when it recomputes them, so the pair is exact -- no hashing, and no
-	// chance of missing a change that kept the same size.
+	// SetDiff runs on every preview tick and every metadata tick, and colourising
+	// is a per-line restyle of the whole diff plus a join of the result: measured
+	// at 18.6ms and 5.5MB allocated for a 3,000-line diff. It is keyed on the
+	// content, not on when the stats were computed: the tick recomputes the
+	// selected session's diff every few seconds while the Diff tab is open, and a
+	// timestamp key re-colourised the whole diff, on the event loop, every time
+	// it came back the same. Comparing the text costs a memcmp.
 	srcInstance *session.Instance
-	srcAt       time.Time
+	srcContent  string
+	srcAdded    int
+	srcRemoved  int
 	srcTheme    int
 }
 
@@ -87,17 +90,16 @@ func (d *DiffPane) SetDiff(instance *session.Instance) {
 	}
 
 	if stats.IsEmpty() {
-		d.stats = ""
-		d.diff = ""
-		d.srcInstance, d.srcAt = nil, time.Time{}
+		d.forget()
 		d.viewport.SetContent(centeredFallbackMessage())
 	} else {
-		// Already rendered, and the stats have not been recomputed since.
-		if d.srcInstance == instance && d.srcAt.Equal(instance.DiffStatsAt()) && d.srcTheme == diffThemeGeneration &&
-			d.diff != "" {
+		// Already rendered, and what was rendered has not changed since.
+		if d.srcInstance == instance && d.srcTheme == diffThemeGeneration && d.diff != "" &&
+			d.srcAdded == stats.Added && d.srcRemoved == stats.Removed && d.srcContent == stats.Content {
 			return
 		}
-		d.srcInstance, d.srcAt, d.srcTheme = instance, instance.DiffStatsAt(), diffThemeGeneration
+		d.srcInstance, d.srcTheme = instance, diffThemeGeneration
+		d.srcContent, d.srcAdded, d.srcRemoved = stats.Content, stats.Added, stats.Removed
 		var files int
 		d.diff, files = colorizeDiff(stats.Content)
 		noun := "files"
@@ -113,8 +115,12 @@ func (d *DiffPane) SetDiff(instance *session.Instance) {
 
 // content is what the viewport shows: the summary line over the diff, cut to
 // the pane's width.
+//
+// Joined by hand, not with lipgloss.JoinVertical, which pads every line to the
+// widest one: a single line wider than the pane then made every line too wide,
+// and clipLines cut them all -- each ending in "…" however short it was.
 func (d *DiffPane) content() string {
-	return clipLines(lipgloss.JoinVertical(lipgloss.Left, d.stats, d.diff), d.width)
+	return clipLines(d.stats+"\n"+d.diff, d.width)
 }
 
 // centered fills the pane with one message.
@@ -126,7 +132,7 @@ func (d *DiffPane) centered(message string) string {
 // is rebuilt rather than compared against a stale stamp.
 func (d *DiffPane) forget() {
 	d.diff, d.stats = "", ""
-	d.srcInstance, d.srcAt = nil, time.Time{}
+	d.srcInstance, d.srcContent, d.srcAdded, d.srcRemoved = nil, "", 0, 0
 }
 
 func (d *DiffPane) String() string {
