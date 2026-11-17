@@ -178,6 +178,19 @@ func (m *home) removeInstance(target *session.Instance) bool {
 	return true
 }
 
+// startInstance returns the Cmd that starts instance off the loop, and records
+// it as starting until its instanceStartedMsg comes back.
+func (m *home) startInstance(instance *session.Instance, selectedBranch string) tea.Cmd {
+	if m.starting == nil {
+		m.starting = map[*session.Instance]bool{}
+	}
+	m.starting[instance] = true
+	return func() tea.Msg {
+		err := instance.Start(true)
+		return instanceStartedMsg{instance: instance, err: err, selectedBranch: selectedBranch}
+	}
+}
+
 // discardPending abandons the new session being named or prompted for. It has
 // not been started, so there is nothing of it outside the list to tear down.
 func (m *home) discardPending() {
@@ -463,6 +476,7 @@ func (m *home) killApproved(instance *session.Instance) tea.Cmd {
 		m.syncDevBadge()
 	}
 
+	m.killing++
 	return tea.Batch(
 		m.instanceChanged(),
 		func() tea.Msg {

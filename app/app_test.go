@@ -1301,3 +1301,47 @@ func TestAStartFinishingWhileNamingLeavesTheNewSessionAlone(t *testing.T) {
 		})
 	}
 }
+
+// Quitting while a session is being started, resumed, checked out or killed cut
+// that work off halfway: a start left a tmux session and a worktree no row owns,
+// a checkout was saved as still running. The first q now says so and only a
+// second one quits.
+func TestQuitWaitsForASecondPressWhileWorkIsInFlight(t *testing.T) {
+	storage, err := session.NewStorage(&fakeInstanceStorage{instances: json.RawMessage("[]")})
+	require.NoError(t, err)
+	h := newDevStackHome(t, dev.New(nil), &fakeAppState{})
+	h.storage = storage
+	// A notice's Cmd is its hide timer, so it is not waited out.
+	quits := func(cmd tea.Cmd) bool {
+		if cmd == nil {
+			return false
+		}
+		got := make(chan tea.Msg, 1)
+		go func() { got <- cmd() }()
+		select {
+		case msg := <-got:
+			_, ok := msg.(tea.QuitMsg)
+			return ok
+		case <-time.After(200 * time.Millisecond):
+			return false
+		}
+	}
+	press := func(k string) tea.Cmd { h.keySent = true; _, cmd := h.handleKeyPress(keyText(k)); return cmd }
+
+	resuming, err := session.NewInstance(session.InstanceOptions{Title: "resuming", Path: ".", Program: "claude"})
+	require.NoError(t, err)
+	h.busy = map[*session.Instance]bool{resuming: true}
+
+	require.False(t, quits(press("q")), "the first q must not quit with a resume in flight")
+	require.Contains(t, h.errBox.String(), "press q again")
+	require.True(t, quits(press("q")), "the second q quits anyway")
+
+	h.quitArmed = false
+	require.False(t, quits(press("q")))
+	press("j")
+	require.False(t, quits(press("q")), "another key in between disarms the second press")
+
+	h.busy = nil
+	h.quitArmed = false
+	require.True(t, quits(press("q")), "with nothing in flight q quits at once")
+}

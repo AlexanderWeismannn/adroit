@@ -177,11 +177,7 @@ func (m *home) restoreSession(record config.KilledSession) (tea.Model, tea.Cmd) 
 	finalize()
 	m.menu.SetState(ui.StateDefault)
 
-	startCmd := func() tea.Msg {
-		err := instance.Start(true)
-		return instanceStartedMsg{instance: instance, err: err}
-	}
-	return m, tea.Batch(tea.RequestWindowSize, m.instanceChanged(), startCmd)
+	return m, tea.Batch(tea.RequestWindowSize, m.instanceChanged(), m.startInstance(instance, ""))
 }
 
 // uniqueTitle keeps a restored session from colliding with one already in the

@@ -133,12 +133,7 @@ func (m *home) handleKeyPress(msg tea.KeyPressMsg) (mod tea.Model, cmd tea.Cmd) 
 			m.menu.SetState(ui.StateDefault)
 
 			// Return a tea.Cmd that runs instance.Start in the background
-			startCmd := func() tea.Msg {
-				err := instance.Start(true)
-				return instanceStartedMsg{instance: instance, err: err}
-			}
-
-			return m, tea.Batch(tea.RequestWindowSize, m.instanceChanged(), startCmd)
+			return m, tea.Batch(tea.RequestWindowSize, m.instanceChanged(), m.startInstance(instance, ""))
 		case tea.KeySpace:
 			if err := instance.SetTitle(instance.Title + " "); err != nil {
 				return m, m.handleError(err)
@@ -240,6 +235,7 @@ func (m *home) handleKeyPress(msg tea.KeyPressMsg) (mod tea.Model, cmd tea.Cmd) 
 	if msg.String() == "ctrl+c" || msg.String() == "q" {
 		return m.handleQuit()
 	}
+	m.quitArmed = false
 
 	// 1-9 select the row wearing that number. Not in the key map: nine bindings
 	// for one action would crowd the menu, and the numbers are already on screen.

@@ -154,16 +154,7 @@ func (s *promptScreen) handleKey(m *home, msg tea.KeyPressMsg) tea.Cmd {
 				m.overlay = nil
 				m.menu.SetState(ui.StateDefault)
 
-				startCmd := func() tea.Msg {
-					err := selected.Start(true)
-					return instanceStartedMsg{
-						instance:       selected,
-						err:            err,
-						selectedBranch: selectedBranch,
-					}
-				}
-
-				return tea.Batch(tea.RequestWindowSize, m.instanceChanged(), startCmd)
+				return tea.Batch(tea.RequestWindowSize, m.instanceChanged(), m.startInstance(selected, selectedBranch))
 			}
 
 			// Instance already running (the `i` key): send the prompt and go

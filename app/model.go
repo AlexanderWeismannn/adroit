@@ -96,6 +96,14 @@ type home struct {
 	// loop, so a second press of the same key -- or a kill -- cannot start on a
 	// session that is still halfway through the first.
 	busy map[*session.Instance]bool
+	// starting holds the sessions whose Start is running off the loop, and
+	// killing counts the teardowns still running after their row has gone. With
+	// busy, they are what a quit would cut short; see handleQuit.
+	starting map[*session.Instance]bool
+	killing  int
+	// quitArmed is set when a quit was refused because work was in flight; the
+	// next q quits anyway. Any other key disarms it.
+	quitArmed bool
 	// startupNotice is shown once the interface is up: something found while
 	// loading that is worth a look but not worth refusing to start over.
 	startupNotice string
@@ -609,6 +617,7 @@ func (m *home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case killApprovedMsg:
 		return m, m.killApproved(msg.instance)
 	case killFinishedMsg:
+		m.killing--
 		// The row is already gone, so this is not a failed kill from where the user
 		// is sitting -- it is a leftover they need to know about.
 		if msg.err != nil {
@@ -666,6 +675,7 @@ func (m *home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(m.instanceChanged(), m.handleNotice(notice))
 	case instanceStartedMsg:
+		delete(m.starting, msg.instance)
 		// A new session may be being named, or another screen may be open, while
 		// this one was starting. The cursor, the menu and the screen belong to
 		// that, so the start leaves them alone: moving the cursor here put the
@@ -719,7 +729,24 @@ func (m *home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// inFlight counts the sessions that work off the loop is still changing: being
+// started, resumed, checked out, or torn down.
+func (m *home) inFlight() int {
+	return len(m.busy) + len(m.starting) + m.killing
+}
+
+// handleQuit saves and quits -- unless something is still being started,
+// resumed, checked out or killed, in which case the first press says so and only
+// a second one quits. Quitting under that work kills it halfway: a start leaves
+// a tmux session and a worktree that no row owns, a checkout is saved as still
+// running, a kill leaves its worktree behind. A signal still quits at once; see
+// terminateMsg.
 func (m *home) handleQuit() (tea.Model, tea.Cmd) {
+	if n := m.inFlight(); n > 0 && !m.quitArmed {
+		m.quitArmed = true
+		return m, m.handleNotice(fmt.Sprintf(
+			"%d session(s) still starting, checking out or being killed — wait for them, or press q again to quit anyway", n))
+	}
 	if err := m.storage.SaveInstances(m.list.GetInstances()); err != nil {
 		return m, m.handleError(err)
 	}
