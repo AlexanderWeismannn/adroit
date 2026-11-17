@@ -57,7 +57,7 @@ type Settings struct {
 	// checks holds the last key-check result per profile.
 	checks map[string]string
 
-	width int
+	width, height int
 }
 
 type settingsMode int
@@ -124,6 +124,10 @@ func profileFromProgram(program string) config.Profile {
 
 // SetWidth bounds the overlay to the terminal.
 func (s *Settings) SetWidth(w int) { s.width = w }
+
+// SetSize gives the box the terminal's width and height: at 24 rows the fixed
+// sixteen-line body pushed the box over the key bar.
+func (s *Settings) SetSize(w, h int) { s.width, s.height = w, h }
 
 // Config is the edited configuration, for the caller to adopt after a save.
 func (s *Settings) Config() *config.Config { return s.cfg }
@@ -683,6 +687,15 @@ func (s *Settings) Render() string {
 		width = 50
 	}
 	inner := width - 6 // border and padding
+	// A note is wrapped, not cut: the one about where keys are kept used to stop
+	// at its comma, before the part that says they are safe.
+	note := func(text string) string {
+		lines := strings.Split(ansi.Wrap(text, inner, ""), "\n")
+		for i, l := range lines {
+			lines[i] = muted.Render(l)
+		}
+		return strings.Join(lines, "\n")
+	}
 
 	var b strings.Builder
 	// The tab bar, drawn like the main window's.
@@ -735,7 +748,7 @@ func (s *Settings) Render() string {
 				fmt.Sprintf("%s %-10s %-24s %s", defPlain, name, prog, keyPlain))
 		}
 		row(len(s.cfg.Profiles), accent.Render("+ add an agent"), "+ add an agent")
-		b.WriteString("\n" + muted.Render("keys go to "+s.store.Backend()+", never config.json") + "\n")
+		b.WriteString("\n" + note("keys go to "+s.store.Backend()+", never config.json") + "\n")
 	case tabWorkspaces:
 		if s.repo == "" {
 			for i, r := range s.workspaceList() {
@@ -758,7 +771,7 @@ func (s *Settings) Render() string {
 				row(i, line, line)
 			}
 			if f := s.workspaceFields(s.repo); s.cursor[tabWorkspaces] < len(f) && f[s.cursor[tabWorkspaces]].hint != "" {
-				b.WriteString("\n" + muted.Render(f[s.cursor[tabWorkspaces]].hint) + "\n")
+				b.WriteString("\n" + note(f[s.cursor[tabWorkspaces]].hint) + "\n")
 			}
 		}
 	case tabGeneral:
@@ -768,14 +781,15 @@ func (s *Settings) Render() string {
 			row(i, line, line)
 		}
 		if i := s.cursor[tabGeneral]; i < len(fields) && fields[i].hint != "" {
-			b.WriteString("\n" + muted.Render(fields[i].hint) + "\n")
+			b.WriteString("\n" + note(fields[i].hint) + "\n")
 		}
 	}
 
+	var footer string
 	switch s.mode {
 	case modeInput:
 		b.WriteString("\n" + accent.Render(s.inputFor) + "\n" + s.input.View() + "\n")
-		b.WriteString(muted.Render("enter save · esc cancel"))
+		footer = Keys(Key{"↵", "save"}, Key{"esc", "cancel"})
 	case modeChoose:
 		b.WriteString("\n" + accent.Render(s.choiceFor) + "\n")
 		for i, c := range s.choices {
@@ -785,7 +799,7 @@ func (s *Settings) Render() string {
 				b.WriteString("  " + c + "\n")
 			}
 		}
-		b.WriteString(muted.Render("↑↓ choose · enter pick · esc cancel"))
+		footer = Keys(Key{"↑↓", "choose"}, Key{"↵", "pick"}, Key{"esc", "cancel"})
 	default:
 		if s.status != "" {
 			if s.isError {
@@ -794,15 +808,16 @@ func (s *Settings) Render() string {
 				b.WriteString("\n" + ok.Render(s.status) + "\n")
 			}
 		}
-		b.WriteString("\n" + muted.Render(s.help()))
+		footer = Keys(s.help()...)
 	}
 
-	// The last line written is the help line; it is the frame's footer, taken
-	// before fitBox so that it is wrapped there rather than cut here.
-	lines := strings.Split(strings.TrimRight(b.String(), "\n"), "\n")
-	footer := strings.TrimSpace(lines[len(lines)-1])
-	body := fitBox(strings.Join(lines[:len(lines)-1], "\n")+"\n", inner, settingsBodyLines-1)
-	_ = accent
+	// The body keeps one height across tabs and modes, less if the terminal is
+	// too short for it: the box, keys line and all, stays clear of the bar.
+	rows := settingsBodyLines - 1
+	if s.height > 0 {
+		rows = max(min(rows, s.height-3-FrameChrome(width, footer)), 3)
+	}
+	body := fitBox(b.String(), inner, rows)
 	return Frame(width, "Settings", body, footer, theme.Color(theme.Accent))
 }
 
@@ -811,20 +826,21 @@ func (s *Settings) Render() string {
 // opening a prompt does not resize it.
 const settingsBodyLines = 16
 
-// fitBox makes every line exactly width cells -- clipped, or padded -- and the
-// block at least height lines, the help line kept at the bottom. Done here
-// rather than with lipgloss's Width, which wraps and drops trailing spaces,
-// which is what cut the selection bar short.
+// fitBox makes every line exactly width cells -- clipped with an ellipsis, or
+// padded -- and the block exactly height lines: a short one padded at the
+// bottom, and a long one cut. Done here rather than with lipgloss's Width,
+// which wraps and drops trailing spaces, which is what cut the selection bar
+// short.
 func fitBox(content string, width, height int) string {
 	lines := strings.Split(strings.TrimRight(content, "\n"), "\n")
 	if len(lines) < height {
-		help := lines[len(lines)-1]
-		lines = append(lines[:len(lines)-1], make([]string, height-len(lines))...)
-		lines = append(lines, help)
+		lines = append(lines, make([]string, height-len(lines))...)
 	}
+	lines = lines[:height]
 	for i, l := range lines {
 		if w := lipgloss.Width(l); w > width {
-			lines[i] = ansi.Truncate(l, width, "")
+			// Cut with a mark: "ANTHROPIC_API_K" read as a key's whole name.
+			lines[i] = ansi.Truncate(l, width, "…")
 		} else if w < width {
 			lines[i] = l + strings.Repeat(" ", width-w)
 		}
@@ -832,17 +848,18 @@ func fitBox(content string, width, height int) string {
 	return strings.Join(lines, "\n")
 }
 
-func (s *Settings) help() string {
+func (s *Settings) help() []Key {
 	switch s.tab {
 	case tabAgents:
-		return "↑↓ move · s key · t test · d default · a add · enter edit · x remove · tab next · esc close"
+		return []Key{{"↑↓", "move"}, {"↵", "edit"}, {"s", "key"}, {"t", "test"}, {"d", "default"},
+			{"a", "add"}, {"x", "remove"}, {"tab", "next tab"}, {"esc", "close"}}
 	case tabWorkspaces:
 		if s.repo == "" {
-			return "↑↓ move · enter open · tab next · esc close"
+			return []Key{{"↑↓", "move"}, {"↵", "open"}, {"tab", "next tab"}, {"esc", "close"}}
 		}
-		return "↑↓ move · enter change · esc back"
+		return []Key{{"↑↓", "move"}, {"↵", "change"}, {"esc", "back"}}
 	}
-	return "↑↓ move · enter change · tab next · esc close"
+	return []Key{{"↑↓", "move"}, {"↵", "change"}, {"tab", "next tab"}, {"esc", "close"}}
 }
 
 // keyStatus is the API key column, styled and plain.

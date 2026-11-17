@@ -51,8 +51,9 @@ const needsInputChip = "? "
 // unseenIcon is a finished turn you have not looked at yet, once the chip has
 // had its moment. Kept until the cursor lands on the row, so coming back to the
 // terminal after ten minutes still says which sessions finished while you were
-// away -- the ready dot alone says only that they are idle now.
-const unseenIcon = "✓ "
+// away -- the ready dot alone says only that they are idle now. A four-pointed
+// star, not the check it used to be: ✓ is a passing build on the line below.
+const unseenIcon = "✦ "
 
 // doneChipWindow is how long that mark lasts: long enough to catch on your way
 // back to the terminal, short enough that a list left alone settles back to dots
@@ -62,6 +63,15 @@ const doneChipWindow = 15 * time.Second
 // spinnerLegendFrame is one frame of the animation, for the legend, which has no
 // tick of its own to advance it.
 const spinnerLegendFrame = "⠹"
+
+// shellFrames animate a row whose agent has stopped while a shell it started is
+// still running. They turn on the same tick as the agent's spinner but are a
+// different shape: the two states used to be one spinner in two colours, which
+// a narrow palette -- or a colour-blind reader -- could not tell apart.
+var shellFrames = []string{"◐", "◓", "◑", "◒"}
+
+// shellLegendFrame is the shell's frame for the legend.
+const shellLegendFrame = "◐"
 
 // CI badge icons. The verdict is a glyph so it reads at a glance, and the colour
 // carries the same information again for anyone scanning the column rather than
@@ -88,9 +98,11 @@ const (
 // None may carry an emoji presentation. The obvious choice for a conflict, U+26A0
 // WARNING SIGN, does in many fonts: runewidth measures it as one cell while the
 // terminal draws two, silently desynchronising the width accounting the badge
-// depends on. A bare "!" cannot, and U+2605 is not the emoji star (U+2B50).
+// depends on. U+2260 cannot, and U+2605 is not the emoji star (U+2B50).
 const (
-	ciConflictIcon = "!"
+	// Not a bare "!", which after a PR number read as emphasis ("#5503 !"); the
+	// word "conflict" is kept longest when there is room for words at all.
+	ciConflictIcon = "≠"
 	ciChangesIcon  = "✎"
 	ciApprovedIcon = "★"
 	// ciCommentIcon marks review or conversation remarks. A quotation ornament:
@@ -144,14 +156,14 @@ var needsInputChipStyle, unseenStyle lipgloss.Style
 // The selected row's colours are their own pair of roles rather than a shade of
 // the accent: they have to contrast with each other, which no single hue can
 // guarantee across every theme.
-var selectedBg, selectedFg, selectionAccent color.Color
+var selectedBg, selectedFg color.Color
 
 // Left padding drops to 0 where the border is added, so the bar occupies the
 // column the padding used to and the row's total width is unchanged — the
 // unselected styles keep their padding and the two stay aligned.
 var selectedTitleStyle, selectedDescStyle lipgloss.Style
 
-var mainTitle, autoYesStyle, listRuleStyle, listUnfocusedRuleStyle, listLabelStyle lipgloss.Style
+var listRuleStyle, listUnfocusedRuleStyle, listLabelStyle lipgloss.Style
 
 // Styles hold a copy of their colour, so a theme change has to rebuild them
 // rather than be re-read. Registered here so a package added later cannot be
@@ -199,7 +211,6 @@ func applyListTheme() {
 
 	selectedBg = theme.Color(theme.SelectionBg)
 	selectedFg = theme.Color(theme.SelectionFg)
-	selectionAccent = theme.Color(theme.Accent)
 
 	selectedTitleStyle = lipgloss.NewStyle().
 		Bold(true).
@@ -212,12 +223,6 @@ func applyListTheme() {
 	listRuleStyle = lipgloss.NewStyle().Foreground(theme.Color(theme.Accent))
 	listUnfocusedRuleStyle = lipgloss.NewStyle().Foreground(theme.Color(theme.Muted))
 	listLabelStyle = lipgloss.NewStyle().Foreground(theme.Color(theme.Muted))
-	mainTitle = lipgloss.NewStyle().
-		Background(theme.Color(theme.Accent)).
-		Foreground(theme.Color(theme.AccentText))
-	autoYesStyle = lipgloss.NewStyle().
-		Background(theme.Color(theme.SelectionBg)).
-		Foreground(theme.Color(theme.SelectionFg))
 }
 
 type List struct {
@@ -236,6 +241,9 @@ type List struct {
 	autoyes       bool
 	// focused is whether the list owns the keyboard, which its border shows.
 	focused bool
+	// restorable is whether a killed session can be restored, which the empty
+	// list offers only when it can.
+	restorable bool
 	// compact draws one line per session, for the mode where the list has the
 	// whole width and the window is behind it.
 	compact bool
@@ -365,6 +373,10 @@ type InstanceRenderer struct {
 
 	spinner *spinner.Model
 	width   int
+
+	// repoOf is the list's record of the repository each row was counted
+	// under, shared so a row can be labelled without running git per frame.
+	repoOf map[*session.Instance]string
 
 	// busy is the rows an action is running on off the loop, and what the
 	// action is: "checking out", "resuming". The row spins and says so from the
@@ -499,102 +511,146 @@ func prMarker(status ci.Status) (icon, label string, style lipgloss.Style) {
 	}
 }
 
-// ciBadge renders a branch's CI verdict twice over: plain for width accounting,
-// styled for display. Both are empty when there is nothing to report, which is
-// also what a disabled feature and a not-yet-completed first lookup produce, so
-// the badge appears only once it can say something true.
+// A badge is one fact on a row's branch line: the remote's drift, the CI
+// verdict, the pull request's review state, remarks on it. Each is a glyph that
+// is always shown, a pull-request number and a word that are shown while there
+// is room for them.
 //
-// With labelled set, every mark is followed by the word for what it means. The
-// row is read by people who are not holding a glyph table in their heads, and
-// the second line is usually mostly empty -- a session's branch is normally an
-// echo of its title and dropped -- so the space is there to spend. The caller
-// falls back to the bare glyphs when it is not.
-//
-// The two halves must stay in step: plain is what the caller subtracts from the
-// branch name's width budget, so any span added to styled has to be added to
-// plain too, or the row overflows its pane.
-func ciBadge(status ci.Status, bg color.Color, labelled bool) (plain, styled string) {
-	if labelled {
-		return ciBadgeAt(status, bg, badgeWordsAll)
-	}
-	return ciBadgeAt(status, bg, badgeWordsNone)
+// The words go by urgency, not by position. They used to be given up in a
+// fixed order -- the verdict's word last -- so the row with the most to say (a
+// failed build, changes requested, remarks, behind its remote) was the first
+// to lose every word, while a calm row two lines down kept "passed". Now the
+// pull-request number goes first, then the calmest words, and "failed",
+// "changes" and "conflict" are the last words any row gives up.
+type badge struct {
+	// ci is a fact about the pull request rather than about the remote: the
+	// part of the line that gives way first to a branch name squeezed too far.
+	ci    bool
+	glyph string
+	num   string
+	word  string
+	rank  int
+	style lipgloss.Style
 }
 
-// How many of a badge's words are spelled out. They are given up one at a time,
-// least useful first, rather than all together: the row used to lose every word
-// the moment the full set missed by a cell, and "✓ #4773 ★ ❞" is a glyph puzzle
-// where "✓ #4773 passed ★ ❞" would have fitted.
+// How urgently a badge's word is needed. A row that cannot fit every word
+// drops them from the lowest rank up.
 const (
-	badgeWordsNone    = 0 // glyphs only
-	badgeWordsVerdict = 1 // the CI verdict's word
-	badgeWordsReview  = 2 // and the review marker's
-	badgeWordsAll     = 3 // and "comments"
+	rankHistory = iota // a remark the branch has moved past
+	rankCalm           // passed, running, unpushed, closed, no PR
+	rankNote           // approved, merged
+	rankAct            // behind, remarks waiting on you
+	rankRisk           // diverged from the remote
+	rankBlock          // failed, changes requested, merge conflict
+	rankNone           // above every word: glyphs only
 )
 
-func ciBadgeAt(status ci.Status, bg color.Color, words int) (plain, styled string) {
-	var icon, label string
-	var style lipgloss.Style
+// rowBadges lists a row's badges in the order they are drawn: the remote's
+// drift, then the verdict, the review state and the remarks. Nothing is listed
+// for a fact that is not known, or has nothing to say.
+func rowBadges(status ci.Status, up upstream.Status) []badge {
+	var out []badge
+	switch {
+	case !up.Tracked():
+	case up.Diverged():
+		// Both counts, each behind its own arrow: which way to reconcile depends
+		// on them, and it is the only state where updating means discarding
+		// something. Written out rather than packed into one glyph and a slash --
+		// "⇅2/17" does not say which number is which.
+		out = append(out, badge{glyph: fmt.Sprintf("%s%d %s%d", upstreamAheadIcon, up.Ahead, upstreamBehindIcon, up.Behind),
+			word: "diverged", rank: rankRisk, style: removedLinesStyle})
+	case up.Behind > 0:
+		out = append(out, badge{glyph: fmt.Sprintf("%s%d", upstreamBehindIcon, up.Behind), word: "behind", rank: rankAct, style: ciPendingStyle})
+	case up.Ahead > 0:
+		out = append(out, badge{glyph: fmt.Sprintf("%s%d", upstreamAheadIcon, up.Ahead), word: "unpushed", rank: rankCalm, style: pausedStyle})
+	}
 
+	num := ""
+	if status.PRNumber > 0 {
+		num = fmt.Sprintf("#%d", status.PRNumber)
+	}
 	switch status.State {
 	case ci.StateSuccess:
-		icon, label, style = ciSuccessIcon, "passed", addedLinesStyle
+		out = append(out, badge{ci: true, glyph: ciSuccessIcon, num: num, word: "passed", rank: rankCalm, style: addedLinesStyle})
 	case ci.StateFailure:
-		icon, label, style = ciFailureIcon, "failed", removedLinesStyle
+		out = append(out, badge{ci: true, glyph: ciFailureIcon, num: num, word: "failed", rank: rankBlock, style: removedLinesStyle})
 	case ci.StatePending:
-		icon, label, style = ciPendingIcon, "running", ciPendingStyle
+		out = append(out, badge{ci: true, glyph: ciPendingIcon, num: num, word: "running", rank: rankCalm, style: ciPendingStyle})
 	// The three terminal states name themselves instead of showing the PR number.
 	// Nothing is going to change about them, so there is nothing to go and look at;
-	// what matters is the state, and cs documents none of its glyphs anywhere.
-	// They carry no marker either: a merged pull request's review verdict is
-	// history, and a closed one's is moot.
+	// what matters is the state. They carry no marker either: a merged pull
+	// request's review verdict is history, and a closed one's is moot.
 	case ci.StateMerged:
-		plain = ciMergedIcon + " merged"
-		return plain, ciMergedStyle.Background(bg).Render(plain)
+		return append(out, badge{ci: true, glyph: ciMergedIcon, word: "merged", rank: rankNote, style: ciMergedStyle})
 	case ci.StateClosed:
-		plain = ciClosedIcon + " closed"
-		return plain, pausedStyle.Background(bg).Render(plain)
+		return append(out, badge{ci: true, glyph: ciClosedIcon, word: "closed", rank: rankCalm, style: pausedStyle})
 	case ci.StateNoPR:
-		plain = ciNoPRIcon + " no PR"
-		return plain, pausedStyle.Background(bg).Render(plain)
+		return append(out, badge{ci: true, glyph: ciNoPRIcon, word: "no PR", rank: rankCalm, style: pausedStyle})
 	default:
-		return "", ""
+		return out
 	}
 
-	plain = icon
-	if status.PRNumber > 0 {
-		plain = fmt.Sprintf("%s #%d", icon, status.PRNumber)
-	}
-	if words >= badgeWordsVerdict {
-		plain += " " + label
-	}
-	styled = style.Background(bg).Render(plain)
-
-	// The marker is a separate span because it carries its own colour: a green
-	// approval next to a red cross is the whole point, and one style over both
-	// would have to pick a side.
-	if markerIcon, markerLabel, markerStyle := prMarker(status); markerIcon != "" {
-		mark := markerIcon
-		if words >= badgeWordsReview {
-			mark += " " + markerLabel
+	// The marker is its own badge because it carries its own colour: a green
+	// approval next to a red cross is the whole point.
+	if icon, label, style := prMarker(status); icon != "" {
+		rank := rankBlock
+		if status.Review == ci.ReviewApproved && status.Mergeable != ci.MergeConflicting {
+			rank = rankNote
 		}
-		plain += " " + mark
-		styled += lipgloss.Style{}.Background(bg).Render(" ") +
-			markerStyle.Background(bg).Render(mark)
+		out = append(out, badge{ci: true, glyph: icon, word: label, rank: rank, style: style})
 	}
-
-	// A second span rather than another case in prMarker, because feedback is
-	// not exclusive with the rest: a pull request is routinely approved AND
-	// still carrying remarks, and collapsing the two would hide one of them.
-	if feedbackIcon, feedbackStyle := feedbackMarker(status); feedbackIcon != "" {
-		mark := feedbackIcon
-		if words >= badgeWordsAll {
-			mark += " comments"
+	// Feedback is not exclusive with the rest: a pull request is routinely
+	// approved AND still carrying remarks, and collapsing the two would hide one.
+	if icon, style := feedbackMarker(status); icon != "" {
+		rank := rankHistory
+		if status.Feedback == ci.FeedbackOutstanding {
+			rank = rankAct
 		}
-		plain += " " + mark
-		styled += lipgloss.Style{}.Background(bg).Render(" ") +
-			feedbackStyle.Background(bg).Render(mark)
+		out = append(out, badge{ci: true, glyph: icon, word: "comments", rank: rank, style: style})
+	}
+	return out
+}
+
+// renderBadges draws badges plain, for width accounting, and styled, for
+// display: with their pull-request numbers or without, and with the words of
+// rank minRank and above. The two halves must stay in step -- plain is what the
+// caller subtracts from the branch name's budget.
+func renderBadges(badges []badge, bg color.Color, numbers bool, minRank int) (plain, styled string) {
+	for k, b := range badges {
+		text := b.glyph
+		if numbers && b.num != "" {
+			text += " " + b.num
+		}
+		if b.word != "" && b.rank >= minRank {
+			text += " " + b.word
+		}
+		if k > 0 {
+			plain += " "
+			styled += lipgloss.NewStyle().Background(bg).Render(" ")
+		}
+		plain += text
+		styled += b.style.Background(bg).Render(text)
 	}
 	return plain, styled
+}
+
+// badgeLevels is the order a row gives its badges' extras up in: the
+// pull-request number first, then the words from the calmest up.
+var badgeLevels = []struct {
+	numbers bool
+	minRank int
+}{
+	{true, rankHistory}, {false, rankHistory}, {false, rankCalm}, {false, rankNote},
+	{false, rankAct}, {false, rankRisk}, {false, rankBlock}, {false, rankNone},
+}
+
+// ciBadge renders a pull request's badges -- verdict, review state, remarks --
+// with every word, or as bare glyphs and the number.
+func ciBadge(status ci.Status, bg color.Color, labelled bool) (plain, styled string) {
+	if labelled {
+		return renderBadges(rowBadges(status, upstream.Status{}), bg, true, rankHistory)
+	}
+	return renderBadges(rowBadges(status, upstream.Status{}), bg, true, rankNone)
 }
 
 // feedbackMarker reports whether anyone has left remarks, and how loudly to say
@@ -620,47 +676,20 @@ func hasOutstandingFeedback(status ci.Status) bool {
 }
 
 // syncBadge renders how far a session's branch has drifted from its remote
-// counterpart, plain for width accounting and styled for display -- the same
-// contract as ciBadge, and the same requirement that the two stay in step.
-//
-// Empty for a branch that is level with its remote, or has none, which is the
-// ordinary state of a session doing its own work. The badge is a notification,
-// so a row only grows one when there is something to do about it.
+// counterpart -- the same contract as ciBadge. Empty for a branch level with
+// its remote, or with none: the badge is a notification, so a row only grows
+// one when there is something to do about it.
 //
 // Behind is warning-coloured and diverged is danger-coloured because both mean
 // the code on screen is not the code on the branch. Ahead alone is dim: it is
 // the normal condition of a session mid-task, and colouring it would nag about
 // every unpushed commit.
 func syncBadge(status upstream.Status, bg color.Color, labelled bool) (plain, styled string) {
-	label := func(text, word string) string {
-		if labelled {
-			return text + " " + word
-		}
-		return text
+	minRank := rankNone
+	if labelled {
+		minRank = rankHistory
 	}
-
-	var style lipgloss.Style
-	switch {
-	case !status.Tracked():
-		return "", ""
-	case status.Diverged():
-		// Both counts, each behind its own arrow: which way to reconcile depends
-		// on them, and it is the only state where updating means discarding
-		// something. Written out rather than packed into one glyph and a slash --
-		// "⇅2/17" does not say which number is which.
-		plain = label(fmt.Sprintf("%s%d %s%d",
-			upstreamAheadIcon, status.Ahead, upstreamBehindIcon, status.Behind), "diverged")
-		style = removedLinesStyle
-	case status.Behind > 0:
-		plain = label(fmt.Sprintf("%s%d", upstreamBehindIcon, status.Behind), "behind")
-		style = ciPendingStyle
-	case status.Ahead > 0:
-		plain = label(fmt.Sprintf("%s%d", upstreamAheadIcon, status.Ahead), "unpushed")
-		style = pausedStyle
-	default:
-		return "", ""
-	}
-	return plain, style.Background(bg).Render(plain)
+	return renderBadges(rowBadges(ci.Status{}, status), bg, false, minRank)
 }
 
 // branchEchoesTitle reports whether a branch name says nothing the title above
@@ -741,18 +770,7 @@ func shortAge(d time.Duration) string {
 // Only on a row that has stopped. A spinning row is saying "now" already, and
 // the number would be a second stale by the time it was read.
 func (r *InstanceRenderer) rowAge(i *session.Instance, beingNamed bool, bg color.Color) (string, int) {
-	if beingNamed || i.Status == session.Loading || i.Status == session.Running {
-		return "", 0
-	}
-	switch i.GetActivity() {
-	case session.ActivityWorking, session.ActivityShell:
-		return "", 0
-	}
-	at := i.LastActiveAt()
-	if at.IsZero() {
-		return "", 0
-	}
-	age := shortAge(r.clock().Sub(at))
+	age := r.ageText(i, beingNamed)
 	if age == "" {
 		return "", 0
 	}
@@ -822,8 +840,9 @@ func (r *InstanceRenderer) stateGlyph(i *session.Instance, beingNamed, selected 
 		// Animated even though the agent has stopped. Something it started is
 		// still running and it will pick the work back up by itself, so a still
 		// mark here is precisely the wrong answer -- that is the whole point of
-		// this state. Amber rather than the accent says which of the two it is.
-		return spin(shellStyle)
+		// this state. A turning half-disc in amber, not the agent's dots in the
+		// accent, says which of the two it is by shape as well as colour.
+		return paint(shellStyle, r.shellFrame()+" ")
 	}
 
 	// Activity is only read off interfaces we can parse. For every other program
@@ -856,6 +875,19 @@ func (r *InstanceRenderer) stateGlyph(i *session.Instance, beingNamed, selected 
 	return paint(pausedStyle, notStartedIcon)
 }
 
+// shellFrame is the shell animation's frame for the spinner's current tick.
+func (r *InstanceRenderer) shellFrame() string {
+	if r.spinner != nil {
+		frame := r.spinner.View()
+		for i, f := range r.spinner.Spinner.Frames {
+			if f == frame {
+				return shellFrames[i%len(shellFrames)]
+			}
+		}
+	}
+	return shellLegendFrame
+}
+
 // busyMark is the verb of an action in flight, for the right-hand end of the
 // title line, and its width.
 func (r *InstanceRenderer) busyMark(i *session.Instance, bg color.Color) (string, int) {
@@ -865,14 +897,6 @@ func (r *InstanceRenderer) busyMark(i *session.Instance, bg color.Color) (string
 	}
 	mark := doing + " "
 	return workingStyle.Background(bg).Render(mark), ansi.StringWidth(mark)
-}
-
-// diffSegment is the diff count with the space before it, painted, or nothing.
-func diffSegment(diff string, bg color.Color) string {
-	if diff == "" {
-		return ""
-	}
-	return lipgloss.NewStyle().Background(bg).Render(" ") + diff
 }
 
 // RenderCompact draws a session on one line, for the compact mode and the
@@ -915,16 +939,11 @@ func (r *InstanceRenderer) compactAt(i *session.Instance, selected bool, isLast 
 	if dev, w := r.devBadge(i, bg); w > 0 {
 		add(dev, w)
 	}
-	if plain, styled := ciBadgeAt(i.GetCIStatus(), bg, badgeWordsNone); plain != "" {
+	if plain, styled := renderBadges(rowBadges(i.GetCIStatus(), i.GetUpstreamStatus()), bg, true, rankNone); plain != "" {
 		add(styled, ansi.StringWidth(plain))
 	}
-	if plain, styled := syncBadge(i.GetUpstreamStatus(), bg, false); plain != "" {
+	if plain, styled := diffStat(i.GetDiffStats(), bg); plain != "" {
 		add(styled, ansi.StringWidth(plain))
-	}
-	if st := i.GetDiffStats(); st != nil && st.Error == nil && !st.IsEmpty() {
-		plain := "+" + compactCount(st.Added) + " -" + compactCount(st.Removed)
-		add(addedLinesStyle.Background(bg).Render("+"+compactCount(st.Added))+paint(" ")+
-			removedLinesStyle.Background(bg).Render("-"+compactCount(st.Removed)), ansi.StringWidth(plain))
 	}
 	if age, w := r.rowAge(i, beingNamed, bg); w > 0 {
 		marks = append(marks, age) // rowAge carries its own leading space
@@ -1009,7 +1028,6 @@ func (r *InstanceRenderer) Render(i *session.Instance, idx int, selected bool, h
 	// The three cells the glyph column takes lead both lines, so the title and
 	// the branch start in the same column.
 	const lead = 3
-	prefix := "  " // the branch line's indent, two cells plus the format's own space
 	titleS := selectedTitleStyle
 	descS := selectedDescStyle
 	if !selected {
@@ -1028,7 +1046,7 @@ func (r *InstanceRenderer) Render(i *session.Instance, idx int, selected bool, h
 	glyph := r.stateGlyph(i, beingNamed, selected, bg)
 	busy, busyWidth := r.busyMark(i, bg)
 	// How long the row has been quiet goes at the end of the branch line.
-	age, ageWidth := r.rowAge(i, beingNamed, descS.GetBackground())
+	age := r.ageText(i, beingNamed)
 
 	// A session being named has to look like it is being named.
 	//
@@ -1080,44 +1098,24 @@ func (r *InstanceRenderer) Render(i *session.Instance, idx int, selected bool, h
 	)
 	title = padTo(title, r.width, bg)
 
-	stat := i.GetDiffStats()
+	descBg := descS.GetBackground()
+	paint := func(text string) string { return lipgloss.NewStyle().Background(descBg).Render(text) }
 
-	var diff string
-	var addedDiff, removedDiff string
-	if stat == nil || stat.Error != nil || stat.IsEmpty() {
-		// Don't show diff stats if there's an error or if they don't exist
-		addedDiff = ""
-		removedDiff = ""
-		diff = ""
-	} else {
-		// Compact: "+25064 -2387" cost the row enough width that the badge
-		// beside it lost every one of its words; "+25k -2.4k" pays for them.
-		addedDiff = "+" + compactCount(stat.Added)
-		removedDiff = "-" + compactCount(stat.Removed)
-		// A space rather than a comma: the two counts are separate quantities, not
-		// a list, and "+2200,-12" reads as one token. Same width either way, so the
-		// accounting below is unaffected.
-		diff = lipgloss.JoinHorizontal(
-			lipgloss.Center,
-			addedLinesStyle.Background(descS.GetBackground()).Render(addedDiff),
-			lipgloss.Style{}.Background(descS.GetBackground()).Foreground(descS.GetForeground()).Render(" "),
-			removedLinesStyle.Background(descS.GetBackground()).Render(removedDiff),
-		)
+	// The right-hand end is two fixed columns, each right-aligned, with a cell
+	// of air before the border: the diff stat, then how long the row has been
+	// quiet. They used to float after the badges, so the counts zig-zagged down
+	// the list and a row's age touched the border ("+120 -4│").
+	statPlain, statStyled := diffStat(i.GetDiffStats(), descBg)
+	// The left: the indent, the glyph and the space after it.
+	const left = 5
+	roomWith := func(stat string) int {
+		right := ageColumn + 1 // the age and the margin
+		if stat != "" {
+			right += ansi.StringWidth(stat) + 1
+		}
+		return r.width - left - right - 1 // and at least one cell before the stat
 	}
-
-	remainingWidth := r.width
-	remainingWidth -= ansi.StringWidth(prefix)
-	remainingWidth -= ansi.StringWidth(branchIcon) // same width as repoIcon
-	remainingWidth -= 2                            // for the literal " " and "-" in the branchLine format string
-	remainingWidth -= ageWidth                     // the quiet-for mark at the end of the line
-
-	diffWidth := ansi.StringWidth(addedDiff) + ansi.StringWidth(removedDiff)
-	if diffWidth > 0 {
-		diffWidth += 2 // the space between the counts and the one before them
-	}
-
-	// Use fixed width for diff stats to avoid layout issues
-	remainingWidth -= diffWidth
+	room := roomWith(statPlain)
 
 	// The branch the worktree actually has checked out, not the one the session
 	// was created with — see Instance.DisplayBranch.
@@ -1142,16 +1140,14 @@ func (r *InstanceRenderer) Render(i *session.Instance, idx int, selected bool, h
 	if branchIsEcho {
 		branch = ""
 	}
-	// While naming, the second line previews the branch the name will create --
-	// the one place the prefix and sanitising rules are visible before they have
-	// already been applied to a branch you are stuck with.
 	// An unstarted session has no branch to name, which left its second line
-	// blank -- half the row saying nothing. It has a name, though, and the branch that name will produce is derivable
-	// from it, so the line says what is coming instead of nothing at all.
-	// Only a session that has no branch at all: one whose name was dropped for
-	// echoing the title has a branch, and saying "not started" about it would be
-	// a statement about the wrong thing. Nor is a paused session unstarted -- it
-	// has run, and its own mark already says where it stands.
+	// blank -- half the row saying nothing. It has a name, though, and the branch
+	// that name will produce is derivable from it, so the line says what is
+	// coming instead of nothing at all. Only a session that has no branch at
+	// all: one whose name was dropped for echoing the title has a branch, and
+	// saying "not started" about it would be a statement about the wrong thing.
+	// Nor is a paused session unstarted -- it has run, and its own mark already
+	// says where it stands.
 	pendingBranch := false
 	if !beingNamed && branch == "" && !branchIsEcho && !i.Started() && !i.Paused() &&
 		i.Status != session.Paused && !i.NoWorktree() {
@@ -1170,6 +1166,9 @@ func (r *InstanceRenderer) Render(i *session.Instance, idx int, selected bool, h
 		branchIsEcho = false
 	}
 
+	// While naming, the second line previews the branch the name will create --
+	// the one place the prefix and sanitising rules are visible before they have
+	// already been applied to a branch you are stuck with.
 	showBranchHint := false
 	if beingNamed {
 		rowIcon = branchIcon
@@ -1185,148 +1184,166 @@ func (r *InstanceRenderer) Render(i *session.Instance, idx int, selected bool, h
 	}
 
 	if i.Started() && hasMultipleRepos {
-		repoName, err := i.RepoName()
-		if err != nil {
-			log.ErrorLog.Printf("could not get repo name in instance renderer: %v", err)
-		} else if branch == "" {
+		// From the list's own record of which repository each row was counted
+		// under: asking the instance runs git, and this is every row, every frame.
+		switch repoName := r.repoName(i); {
+		case repoName == "":
+		case branch == "":
 			branch = repoName
-		} else {
+		default:
 			branch += fmt.Sprintf(" (%s)", repoName)
 		}
 	}
-	// Reserve the badges out of the width budget before the branch is truncated,
-	// so an overlong branch gives way to the verdict rather than pushing it off the
-	// end of the line.
-	//
-	// Built twice: once with every mark spelled out, and once as bare glyphs. The
-	// words are what make the line readable without a legend, and the line is
-	// usually mostly empty -- a branch that echoes its title is dropped, and most
-	// do -- so on any ordinary row they fit. Where they do not, the glyphs are
-	// what the space is for: a name cut short to make room for the word "failed"
-	// would be paying for the explanation with the thing being explained.
-	badges := func(words int) (ciStyled string, ciWidth int, syncStyled string, syncWidth int) {
-		ciPlain, ciStyled := ciBadgeAt(i.GetCIStatus(), descS.GetBackground(), words)
-		ciWidth = ansi.StringWidth(ciPlain)
-		if ciWidth > 0 {
-			ciWidth += 2 // the spaces either side of the badge in branchLine
-		}
-		// The upstream badge is reserved the same way, and separately, because it
-		// outranks the verdict when neither fits: a stale checkout makes every
-		// other thing the row says about the branch a statement about the wrong
-		// commit.
-		// Its word goes last of all, with the verdict's: it is the one that says
-		// the rest of the line describes the wrong commit.
-		syncPlain, syncStyled := syncBadge(i.GetUpstreamStatus(), descS.GetBackground(), words >= badgeWordsVerdict)
-		syncWidth = ansi.StringWidth(syncPlain)
-		if syncWidth > 0 {
-			syncWidth++ // the space before the badge in branchLine
-		}
-		return ciStyled, ciWidth, syncStyled, syncWidth
-	}
 
-	// The words are affordable only when nothing has to be cut to fit them.
-	ciStyled, ciWidth, syncStyled, syncWidth := badges(badgeWordsAll)
-	for words := badgeWordsAll - 1; words >= badgeWordsNone &&
-		ansi.StringWidth(branch)+ciWidth+syncWidth > remainingWidth; words-- {
-		ciStyled, ciWidth, syncStyled, syncWidth = badges(words)
+	// The badges are reserved out of the width before the branch is cut, so an
+	// overlong branch gives way to the verdict rather than pushing it off the
+	// line, and they give their extras up -- the number, then the words, calmest
+	// first -- until they fit beside the whole branch name.
+	all := rowBadges(i.GetCIStatus(), i.GetUpstreamStatus())
+	badges := func(set []badge, level int) (string, string, int) {
+		if len(set) == 0 {
+			return "", "", 0
+		}
+		lv := badgeLevels[level]
+		plain, styled := renderBadges(set, descBg, lv.numbers, lv.minRank)
+		return plain, styled, ansi.StringWidth(plain) + 1 // and the space before it
 	}
-	// Up to a point: the branch name is the row's identity and the badge is an
-	// extra, so on a pane too narrow for both it is the badge that gives way.
-	// Otherwise a 20-column list renders an icon, an ellipsis and no name at all.
-	// With no branch to protect there is nothing to trade against, and the badge
-	// keeps the whole line -- which is the point of dropping the echo above.
-	// The guard protects a branch NAME. A repo label standing in for one is not
-	// that, and a short label would otherwise drop the badge for nothing.
-	if !branchIsEcho && branch != "" && branchSquashed(branch, remainingWidth-ciWidth-syncWidth) {
-		ciStyled, ciWidth = "", 0
-		// Still no room with the verdict gone, so the branch takes the line back.
-		if branchSquashed(branch, remainingWidth-syncWidth) {
-			syncStyled, syncWidth = "", 0
+	urgent := false
+	for _, b := range all {
+		urgent = urgent || b.rank >= rankBlock
+	}
+	level := 0
+	_, badgeStyled, badgeWidth := badges(all, level)
+	for level < len(badgeLevels)-1 && ansi.StringWidth(branch)+badgeWidth > room {
+		level++
+		// The diff stat is worth less than "failed", "changes" or "conflict": a
+		// row down to its most urgent words gives up the stat -- the window's
+		// footer still shows it -- before it gives those up.
+		if urgent && statPlain != "" && badgeLevels[level].minRank > rankBlock {
+			statPlain, statStyled = "", ""
+			room = roomWith("")
+			level--
+		}
+		_, badgeStyled, badgeWidth = badges(all, level)
+	}
+	// Up to a point: the branch name is the row's identity and the badges are
+	// extras, so on a pane too narrow for both it is the pull request's badges
+	// that give way, then the remote's. Otherwise a 20-column list renders an
+	// icon, an ellipsis and no name at all. With no branch to protect there is
+	// nothing to trade against -- which is the point of dropping the echo above.
+	// The guard protects a branch NAME; a repo label standing in for one is not
+	// that, and a short label would otherwise drop the badges for nothing.
+	if !branchIsEcho && branch != "" && branchSquashed(branch, room-badgeWidth) {
+		var sync []badge
+		for _, b := range all {
+			if !b.ci {
+				sync = append(sync, b)
+			}
+		}
+		_, badgeStyled, badgeWidth = badges(sync, len(badgeLevels)-1)
+		if branchSquashed(branch, room-badgeWidth) {
+			badgeStyled, badgeWidth = "", 0
 		}
 	}
-	remainingWidth -= ciWidth + syncWidth
+	room -= badgeWidth
 
 	// Don't show branch if there's no space for it. Or show ellipsis if it's too long.
-	branchWidth := ansi.StringWidth(branch)
-	if remainingWidth < 0 {
+	if room < 3 {
 		branch = ""
-	} else if remainingWidth < branchWidth {
-		if remainingWidth < 3 {
-			branch = ""
-		} else {
-			branch = elideMiddle(branch, remainingWidth)
-		}
+	} else if room < ansi.StringWidth(branch) {
+		branch = elideMiddle(branch, room)
 	}
-	remainingWidth -= ansi.StringWidth(branch)
-
-	// Add spaces to fill the remaining width. Painted, because the hint below may
-	// have put a style -- and so a reset -- immediately before them.
-	spaces := ""
-	if remainingWidth > 0 {
-		spaces = lipgloss.NewStyle().Background(descS.GetBackground()).Render(strings.Repeat(" ", remainingWidth))
-	}
-
-	// Styled only now that its width has been counted and any truncation applied.
-	if pendingBranch && branch != "" {
-		branch = namingPlaceholderStyle.Background(descS.GetBackground()).Render(branch)
-	}
-	if showBranchHint && branch != "" {
-		branch = namingPlaceholderStyle.Background(descS.GetBackground()).Render(branch)
-	}
-
-	syncSegment := ""
-	if syncStyled != "" {
-		syncSegment = lipgloss.Style{}.Background(descS.GetBackground()).Render(" ") + syncStyled
-	}
-
-	ciSegment := ""
-	if ciStyled != "" {
-		// The padding spaces have to carry the row background themselves. They sit
-		// either side of an already-styled span whose trailing reset clears it, so a
-		// bare " " here renders as a black gap on the selected row rather than picking
-		// up its highlight. Same reason the diff separator below is styled.
-		pad := lipgloss.Style{}.Background(descS.GetBackground()).Render(" ")
-		ciSegment = pad + ciStyled + pad
-	}
+	room -= ansi.StringWidth(branch)
 
 	// No name, so no glyph. It exists to label a branch or a directory, and with
 	// the name gone -- an echo of the title, or a pane too narrow to fit it -- it
 	// labels an empty space, where it reads as a stray mark rather than as an icon.
 	//
-	// Its width stays spent rather than reclaimed, so the CI badge and the diff
-	// stats sit in the same column as they do on every other row. Reclaiming it
-	// would make a row shift sideways for no reason the eye can attribute.
+	// Its width stays spent rather than reclaimed, so the badges start in the
+	// same column as they do on every other row.
 	if branch == "" {
 		rowIcon = strings.Repeat(" ", ansi.StringWidth(rowIcon))
 	}
-
 	// A space after the branch glyph, not a hyphen: "⎇-TASK-5636" reads as though
-	// the hyphen were part of the branch name. Still two literal characters, so
-	// the width reserved for them above is unchanged.
-	//
-	// The badges follow the branch rather than sitting at the far right: a line
-	// that is mostly empty with its facts jammed against the edge read as two
-	// unrelated things, and on a row whose branch echoes its title there was
-	// nothing on the left at all. The age keeps the right-hand edge.
-	branchLine := fmt.Sprintf("%s %s %s%s%s%s%s", strings.Repeat(" ", len(prefix)), rowIcon, branch, syncSegment, ciSegment, diffSegment(diff, descS.GetBackground()), spaces)
+	// the hyphen were part of the branch name. The glyph is followed by a space
+	// always -- it draws two cells wide in Windows Terminal (see branchIcon).
+	named := descS.Render(rowIcon + " " + branch)
+	// Styled only now that its width has been counted and any truncation applied.
+	if (pendingBranch || showBranchHint) && branch != "" {
+		named = descS.Render(rowIcon+" ") + namingPlaceholderStyle.Background(descBg).Render(branch)
+	}
+	line := paint("   ") + named
+	if badgeStyled != "" {
+		line += paint(" ") + badgeStyled
+	}
+	line += paint(strings.Repeat(" ", max(room, 0)+1))
+	if statStyled != "" {
+		line += statStyled + paint(" ")
+	}
+	line += ageStyle.Background(descBg).Render(fmt.Sprintf("%*s", ageColumn, age)) + paint(" ")
 
-	// join title and subtitle
-	text := lipgloss.JoinVertical(
-		lipgloss.Left,
-		title,
-		padTo(descS.Render(branchLine)+age, r.width, descS.GetBackground()),
-	)
-
-	return text
+	return lipgloss.JoinVertical(lipgloss.Left, title, padTo(line, r.width, descBg))
 }
 
+// ageColumn is the width of the quiet-for column at the right of a branch
+// line: "59m", "23h", "9d". Older than 99 days spills one cell left.
+const ageColumn = 3
+
+// ageText is how long a row has been quiet, for its age column: "" while it is
+// busy or under a minute quiet.
+func (r *InstanceRenderer) ageText(i *session.Instance, beingNamed bool) string {
+	if beingNamed || i.Status == session.Loading || i.Status == session.Running {
+		return ""
+	}
+	switch i.GetActivity() {
+	case session.ActivityWorking, session.ActivityShell:
+		return ""
+	}
+	at := i.LastActiveAt()
+	if at.IsZero() {
+		return ""
+	}
+	return shortAge(r.clock().Sub(at))
+}
+
+// diffStat is a row's diff count, "+412 −98", plain and painted; nothing for a
+// branch with no diff, or a diff of nothing -- "+0 −0" on every quiet row was
+// noise in the one column the eye runs down for change.
+func diffStat(stat *git.DiffStats, bg color.Color) (plain, styled string) {
+	if stat == nil || stat.Error != nil || stat.IsEmpty() || (stat.Added == 0 && stat.Removed == 0) {
+		return "", ""
+	}
+	// Compact: "+25064 -2387" cost the row enough width that the badge beside it
+	// lost every one of its words; "+25k −2.4k" pays for them. A space rather
+	// than a comma: the two counts are separate quantities, not a list. The
+	// minus sign is U+2212, as in the window footer, the status column and the
+	// Diff tab.
+	added, removed := "+"+compactCount(stat.Added), "−"+compactCount(stat.Removed)
+	return added + " " + removed, addedLinesStyle.Background(bg).Render(added) +
+		lipgloss.NewStyle().Background(bg).Render(" ") + removedLinesStyle.Background(bg).Render(removed)
+}
+
+// repoName is the repository the list counted a row under, or "" when it has
+// not been counted (not started yet).
+func (r *InstanceRenderer) repoName(i *session.Instance) string {
+	if r.repoOf == nil {
+		return ""
+	}
+	return r.repoOf[i]
+}
+
+// SetRestorable records whether a killed session can be brought back, which is
+// whether the empty list offers R.
+func (l *List) SetRestorable(restorable bool) { l.restorable = restorable }
+
 // emptyListHint is the body of a list with no sessions in it, clipped to the
-// column like every row is.
-func emptyListHint(width int) string {
+// column like every row is. R is offered only when there is something to
+// restore: with nothing killed it could only answer that.
+func emptyListHint(width int, restorable bool) string {
 	row := func(k, d string) string {
 		return clip(" "+hintKeyStyle.Width(hintKeyColumn).Render(k)+hintDescStyle.Render(d), width)
 	}
-	return strings.Join([]string{
+	rows := []string{
 		"",
 		clip(" "+titleStyle.Bold(true).Render("No sessions yet"), width),
 		clip(" "+hintDescStyle.Render("An agent in its own worktree,"), width),
@@ -1334,18 +1351,43 @@ func emptyListHint(width int) string {
 		"",
 		row("n", "new session"),
 		row("N", "new session with a prompt"),
-		row("R", "restore a killed session"),
-		row("?", "every key"),
-	}, "\n")
+	}
+	if restorable {
+		rows = append(rows, row("R", "restore a killed session"))
+	}
+	return strings.Join(append(rows, row("?", "every key")), "\n")
 }
 
-// scrollIndicator styles the "N more" markers that stand in for the rows a pane
-// too short to hold them cannot show.
-func scrollIndicator(arrow string, n int) string {
+// scrollIndicator is the marker that stands in for the sessions a pane too
+// short to hold them cannot show: how many, which way, and how many of them
+// need you. Words rather than an arrow: ↑ and ↓ are the ahead and behind
+// counts on the rows themselves, and "↓ 9 more" said nothing about a hidden
+// row waiting on an answer.
+func scrollIndicator(where string, n, needYou int) string {
 	if n <= 0 {
 		return ""
 	}
-	return pausedStyle.Render(fmt.Sprintf("   %s %d more", arrow, n))
+	text := pausedStyle.Render(fmt.Sprintf("   %d more %s", n, where))
+	if needYou > 0 {
+		verb := "needs"
+		if needYou > 1 {
+			verb = "need"
+		}
+		text += pausedStyle.Render(" · ") + ciPendingStyle.Bold(true).Render(fmt.Sprintf("%d %s you", needYou, verb))
+	}
+	return text
+}
+
+// needYouIn counts the sessions in [from, to) that are waiting on you or have
+// a finish you have not seen.
+func (l *List) needYouIn(from, to int) int {
+	n := 0
+	for idx := from; idx < to; idx++ {
+		if l.wantsAttention(idx) > 0 {
+			n++
+		}
+	}
+	return n
 }
 
 // window picks the run of sessions to draw, keeping the selection in view.
@@ -1442,43 +1484,72 @@ func (l *List) rows(width, height int) string {
 	// beside it names n, and the three keys that matter here are worth the
 	// rows that would otherwise be blank.
 	if len(l.items) == 0 {
-		return emptyListHint(width)
+		return emptyListHint(width, l.restorable)
 	}
 
 	var b strings.Builder
 	l.rowAt = l.rowAt[:0]
-	rendered := make([]string, len(l.items))
+	// Every row is the same height -- one line compact, two otherwise -- so the
+	// window is chosen before anything is drawn, and only the rows in it are.
+	// Rendering a row costs tens of microseconds, and a list of 25 drew all of
+	// them on every frame to show nine.
+	rowLines := 2
+	if l.compact {
+		rowLines = 1
+	}
 	heights := make([]int, len(l.items))
 	total := 0
-	for i, item := range l.items {
-		if l.compact {
-			rendered[i] = l.renderer.RenderCompact(item, i == l.selectedIdx, i == len(l.items)-1)
-			heights[i] = 1
-		} else {
-			rendered[i] = l.renderer.Render(item, i+1, i == l.selectedIdx, len(l.repos) > 1, i == len(l.items)-1)
+	for i := range l.items {
+		heights[i] = rowLines
+		if !l.compact {
 			// The blank line that separates one session from the next belongs to
 			// the session above it, so a window's height is the sum of what it
 			// draws.
-			heights[i] = strings.Count(rendered[i], "\n") + 2
+			heights[i]++
 		}
 		total += heights[i]
 	}
-
-	budget := height
-	// Two rows held back for the markers, but only when something is going to be
-	// hidden -- otherwise a list that fits exactly would be scrolled for nothing.
-	if total > budget {
-		budget -= 2
+	render := func(i int) string {
+		if l.compact {
+			return l.renderer.RenderCompact(l.items[i], i == l.selectedIdx, i == len(l.items)-1)
+		}
+		return l.renderer.Render(l.items[i], i+1, i == l.selectedIdx, len(l.repos) > 1, i == len(l.items)-1)
 	}
 
-	start, end := l.window(heights, budget)
+	// The blank that separates one session from the next is not drawn under
+	// the last one, so the window has that row to spare.
+	sep := 1
+	if l.compact {
+		sep = 0
+	}
+	budget := height + sep
+	// A row held back for each marker, but only when something is going to be
+	// hidden -- otherwise a list that fits exactly would be scrolled for nothing.
+	// Both are held first; a window that turns out to need only one takes the
+	// other row back, unless taking it back would make it need both.
+	start, end := 0, len(l.items)
+	if total > budget {
+		first := l.firstVisible
+		start, end = l.window(heights, budget-2)
+		if start == 0 || end == len(l.items) {
+			again := l.firstVisible
+			l.firstVisible = first
+			s2, e2 := l.window(heights, budget-1)
+			if s2 > 0 && e2 < len(l.items) {
+				l.firstVisible = again
+			} else {
+				start, end = s2, e2
+			}
+		}
+	}
 	if start > 0 {
-		b.WriteString(scrollIndicator("↑", start) + "\n")
+		b.WriteString(scrollIndicator("above", start, l.needYouIn(0, start)) + "\n")
 		l.rowAt = append(l.rowAt, -1)
 	}
 	for i := start; i < end; i++ {
-		b.WriteString(rendered[i])
-		for n := strings.Count(rendered[i], "\n") + 1; n > 0; n-- {
+		row := render(i)
+		b.WriteString(row)
+		for n := strings.Count(row, "\n") + 1; n > 0; n-- {
 			l.rowAt = append(l.rowAt, i)
 		}
 		if i != end-1 {
@@ -1491,7 +1562,7 @@ func (l *List) rows(width, height int) string {
 		}
 	}
 	if end < len(l.items) {
-		b.WriteString("\n" + scrollIndicator("↓", len(l.items)-end))
+		b.WriteString("\n" + scrollIndicator("below", len(l.items)-end, l.needYouIn(end, len(l.items))))
 		l.rowAt = append(l.rowAt, -1)
 	}
 	return b.String()
@@ -1747,6 +1818,7 @@ func (l *List) AddInstance(instance *session.Instance) (finalize func()) {
 		}
 		if l.repoOf == nil {
 			l.repoOf = make(map[*session.Instance]string)
+			l.renderer.repoOf = l.repoOf
 		}
 		if l.repos == nil {
 			l.repos = make(map[string]int)
@@ -1809,67 +1881,85 @@ func (l *List) GetInstances() []*session.Instance {
 	return l.items
 }
 
-// BadgeLegend explains the glyph vocabulary used in the instance list.
+// BadgeLegend explains the glyph vocabulary used in the instance list, packed
+// into lines no wider than width: each group of related marks starts a line,
+// and a group too long for one wraps between its entries rather than being cut.
 //
 // It lives here, next to the glyphs and styles it describes, and is exported for
 // the help screen rather than re-spelled there: a legend that names its own
 // colours would drift from the rows it documents the first time one of them
 // changed.
-func BadgeLegend() []string {
+func BadgeLegend(width int) []string {
 	dim := pausedStyle
 	pair := func(style lipgloss.Style, icon, label string) string {
 		return style.Render(icon) + dim.Render("  "+label)
 	}
-	sep := dim.Render("    ")
-
-	return []string{
-		strings.Join([]string{
+	groups := [][]string{
+		{
 			pair(readyStyle, strings.TrimSpace(readyIcon), "ready"),
 			pair(pausedStyle, strings.TrimSpace(pausedIcon), "paused"),
-		}, sep),
-		strings.Join([]string{
-			// One frame of the animation, twice. The two states differ only in
-			// colour, which is exactly the thing a legend is for.
+			pair(pausedStyle, strings.TrimSpace(notStartedIcon), "not started, or PR settled"),
+		},
+		{
+			// One frame of each animation: they turn on the same tick.
 			pair(workingStyle, spinnerLegendFrame, "agent working"),
-			pair(shellStyle, spinnerLegendFrame, "shell still running"),
-		}, sep),
-		strings.Join([]string{
-			doneChipStyle.Render(doneChip) + dim.Render("  just finished"),
+			pair(shellStyle, shellLegendFrame, "shell still running"),
+		},
+		{
+			doneChipStyle.Render(doneChip) + dim.Render(" just finished"),
 			pair(unseenStyle, strings.TrimSpace(unseenIcon), "finished, not looked at yet"),
-		}, sep),
-		needsInputChipStyle.Render(needsInputChip) + dim.Render("  waiting on your answer"),
-		strings.Join([]string{
+		},
+		{needsInputChipStyle.Render(needsInputChip) + dim.Render(" waiting on your answer")},
+		{
 			pair(pausedStyle, branchIcon, "branch in its own worktree"),
 			pair(pausedStyle, repoIcon, "runs in the repo itself"),
-		}, sep),
-		strings.Join([]string{
+		},
+		{
 			pair(addedLinesStyle, lampUpGlyph, "dev stack up here"),
 			pair(ciPendingStyle, lampPendingGlyph, "starting"),
 			pair(removedLinesStyle, lampDownGlyph, "down"),
 			pair(ageStyle, "2h", "quiet for that long"),
-		}, sep),
-		strings.Join([]string{
+		},
+		{
 			pair(addedLinesStyle, ciSuccessIcon, "CI passed"),
 			pair(removedLinesStyle, ciFailureIcon, "CI failed"),
 			pair(ciPendingStyle, ciPendingIcon, "CI running"),
-		}, sep),
-		strings.Join([]string{
+		},
+		{
 			pair(ciMergedStyle, ciMergedIcon, "merged"),
 			pair(pausedStyle, ciClosedIcon, "closed"),
 			pair(pausedStyle, ciNoPRIcon, "no PR"),
-		}, sep),
-		strings.Join([]string{
+		},
+		{
 			pair(ciPendingStyle, upstreamBehindIcon, "behind the remote"),
 			pair(pausedStyle, upstreamAheadIcon, "commits not pushed"),
 			// Diverged is not a glyph of its own any more: it is both counts, each
 			// behind its own arrow, which is the only form that says which is which.
 			pair(removedLinesStyle, upstreamAheadIcon+"n "+upstreamBehindIcon+"n", "diverged from it"),
-		}, sep),
-		strings.Join([]string{
+		},
+		{
 			pair(addedLinesStyle, ciApprovedIcon, "approved"),
 			pair(removedLinesStyle, ciChangesIcon, "changes requested"),
 			pair(removedLinesStyle, ciConflictIcon, "merge conflict"),
 			pair(ciPendingStyle, ciCommentIcon, "comments"),
-		}, sep),
+		},
 	}
+	const sep = "    "
+	var out []string
+	for _, group := range groups {
+		line := ""
+		for _, entry := range group {
+			switch {
+			case line == "":
+				line = entry
+			case width > 0 && lipgloss.Width(line)+len(sep)+lipgloss.Width(entry) > width:
+				out = append(out, line)
+				line = entry
+			default:
+				line += sep + entry
+			}
+		}
+		out = append(out, line)
+	}
+	return out
 }

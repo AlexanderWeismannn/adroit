@@ -169,7 +169,7 @@ func TestOverlayMenusNameTheirKeys(t *testing.T) {
 		want  []string
 	}{
 		{"naming a session", StateNewInstance, []string{"tab", "pick branch", "esc", "cancel"}},
-		{"the prompt overlay", StatePrompt, []string{"tab", "next field", "ctrl+s", "submit", "esc", "cancel"}},
+		{"the prompt overlay", StatePrompt, []string{"tab", "next field", "ctrl+s", "send", "esc", "cancel"}},
 	}
 
 	for _, tt := range tests {
@@ -393,8 +393,10 @@ func TestTheMenuNeverExceedsItsWidth(t *testing.T) {
 	}
 }
 
-// Keys are never dropped, only their glosses: a key you cannot see is
-// unreachable, where a key without its description is merely unexplained.
+// The session's and the tools' keys are never dropped, only their glosses; the
+// interface's fold behind "? keys", which opens the card that lists them. And
+// the session's keys keep their words to the last: below 80 columns the bar
+// used to be "↵ i c p D · d · tab n m s t ? q", every word gone.
 func TestTheMenuKeepsEveryKeyAsItAbbreviates(t *testing.T) {
 	m := NewMenu()
 	m.SetDevEnabled(true)
@@ -408,9 +410,14 @@ func TestTheMenuKeepsEveryKeyAsItAbbreviates(t *testing.T) {
 	for _, width := range []int{110, 70, 50} {
 		m.SetSize(width, 1)
 		rendered := ansiCodes.ReplaceAllString(plain(m.String()), "")
-		for _, k := range []string{"n", "D", "p", "r", "d", "x", "t", "q"} {
+		for _, k := range []string{"D", "p", "r", "d", "x", "?"} {
 			require.Contains(t, rendered, k, "width %d dropped the %q key entirely", width, k)
 		}
+	}
+	m.SetSize(70, 1)
+	rendered := ansiCodes.ReplaceAllString(plain(m.String()), "")
+	for _, k := range []string{"p push", "D kill", "? keys"} {
+		require.Contains(t, rendered, k, "at 70 columns: %q", rendered)
 	}
 }
 
@@ -433,7 +440,7 @@ func TestTheMenuGivesUpSystemDescriptionsFirst(t *testing.T) {
 	rendered := ansiCodes.ReplaceAllString(plain(m.String()), "")
 	require.Contains(t, rendered, "p push", "an action keeps its description")
 	require.NotContains(t, rendered, "q quit", "a system key gives its description up first")
-	require.Contains(t, rendered, "q", "but the key itself stays")
+	require.Contains(t, rendered, "? keys", "and is reachable from the help key that stands for it")
 }
 
 // The update key is the prompt as much as the action: a row is only told it can

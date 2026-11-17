@@ -26,7 +26,7 @@ func (m *home) openSettings() (tea.Model, tea.Cmd) {
 		}
 	}
 	settings := overlay.NewSettings(m.appConfig, secrets.Default(), repo, m.saveSettings)
-	settings.SetWidth(m.termWidth)
+	settings.SetSize(m.termWidth, m.termHeight)
 	m.overlay = &settingsScreen{settings: settings}
 	return m, nil
 }

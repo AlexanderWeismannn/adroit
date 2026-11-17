@@ -108,7 +108,7 @@ const maxRestoreRows = 8
 
 func (r *RestorePicker) Render() string {
 	var body strings.Builder
-	footer := Keys(Key{"↑↓", "select"}, Key{"enter", "restore"}, Key{"esc", "cancel"})
+	footer := Keys(Key{"↑↓", "select"}, Key{"↵", "restore"}, Key{"esc", "cancel"})
 
 	if len(r.entries) == 0 {
 		body.WriteString(restoreHintStyle.Render("Nothing to restore — no session has been killed yet."))
@@ -217,8 +217,6 @@ func truncateTo(s string, width int) string {
 }
 
 var (
-	restoreBorderStyle   lipgloss.Style
-	restoreTitleStyle    lipgloss.Style
 	restoreHintStyle     lipgloss.Style
 	restoreRowStyle      lipgloss.Style
 	restoreSelectedStyle lipgloss.Style
@@ -230,19 +228,14 @@ var (
 func init() { theme.OnChange(applyRestorePickerTheme) }
 
 func applyRestorePickerTheme() {
-	restoreBorderStyle = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(theme.Color(theme.Accent)).
-		Padding(1, 2)
-	restoreTitleStyle = lipgloss.NewStyle().
-		Foreground(theme.Color(theme.Accent)).
-		Bold(true)
-	restoreHintStyle = lipgloss.NewStyle().Foreground(theme.Color(theme.Subtle))
+	// Text is never Subtle: that role is for rules, and is unreadable as words
+	// on several palettes (solarized's equals its selection band).
+	restoreHintStyle = lipgloss.NewStyle().Foreground(theme.Color(theme.Muted))
 	restoreRowStyle = lipgloss.NewStyle().Foreground(theme.Color(theme.Muted))
 	restoreSelectedStyle = lipgloss.NewStyle().
 		Foreground(theme.Color(theme.Accent)).
 		Bold(true)
 	restoreMarkerStyle = lipgloss.NewStyle().Foreground(theme.Color(theme.Accent))
-	restoreMetaStyle = lipgloss.NewStyle().Foreground(theme.Color(theme.Subtle))
+	restoreMetaStyle = lipgloss.NewStyle().Foreground(theme.Color(theme.Muted))
 	restoreDetailStyle = lipgloss.NewStyle().Foreground(theme.Color(theme.Muted))
 }

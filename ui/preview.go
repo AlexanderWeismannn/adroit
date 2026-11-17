@@ -160,13 +160,13 @@ func (p *PreviewPane) UpdateContent(instance *session.Instance) error {
 
 	switch {
 	case instance == nil:
-		p.setFallbackState("No agents running yet. Spin up a new instance with 'n' to get started!")
+		p.setFallbackState("No agents running yet. Start a new session with 'n' to get started!")
 		return nil
 	case instance.GetStatus() == session.Loading:
 		p.setFallbackState("Setting up workspace...")
 		return nil
 	case instance.GetStatus() == session.Paused:
-		where := fmt.Sprintf("The instance can be checked out at '%s'", instance.GetBranch())
+		where := fmt.Sprintf("The session's branch can be checked out at '%s'", instance.GetBranch())
 		if instance.BranchCopied() {
 			where += " (copied to your clipboard)"
 		}
@@ -221,7 +221,7 @@ func (p *PreviewPane) UpdateContent(instance *session.Instance) error {
 // where the content arrives as an argument rather than being fetched.
 func (p *PreviewPane) ApplyCapture(instance *session.Instance, content string) {
 	if instance == nil {
-		p.setFallbackState("No agents running yet. Spin up a new instance with 'n' to get started!")
+		p.setFallbackState("No agents running yet. Start a new session with 'n' to get started!")
 		return
 	}
 	if instance != p.previewed {

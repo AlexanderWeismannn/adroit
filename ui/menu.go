@@ -20,7 +20,9 @@ func init() { theme.OnChange(applyMenuTheme) }
 func applyMenuTheme() {
 	keyStyle = lipgloss.NewStyle().Bold(true).Foreground(theme.Color(theme.Accent))
 	descStyle = lipgloss.NewStyle().Foreground(theme.Color(theme.Muted))
-	sepStyle = lipgloss.NewStyle().Foreground(theme.Color(theme.Subtle))
+	// Muted, not Subtle: Subtle is for rules, and a separator dot in it was
+	// #dadada on a white terminal -- there, but not legible as a group break.
+	sepStyle = lipgloss.NewStyle().Foreground(theme.Color(theme.Muted))
 }
 
 const (
@@ -149,6 +151,9 @@ func (m *Menu) SetRestorable(restorable bool) {
 	m.updateOptions()
 }
 
+// Restorable reports whether there is a killed session to restore.
+func (m *Menu) Restorable() bool { return m.restorable }
+
 // SetDevRunning records whether a dev stack is currently up.
 func (m *Menu) SetDevRunning(running bool) {
 	if m.devRunning == running {
@@ -270,9 +275,11 @@ func (m *Menu) SetSize(width, height int) {
 // never truncates, so an over-wide bar both ran off the right edge and pushed
 // the list sideways behind an empty gutter.
 //
-// Keys are never dropped, only their words, and the session's own keys keep
-// theirs longest: a key you cannot see is unreachable, where a key without its
-// gloss is merely unexplained -- and `?` explains all of them.
+// The session's own keys keep their words longest: they change with the
+// selection, so they are the ones worth explaining. The interface's keys --
+// the same on every screen -- fold behind "? keys" rather than standing bare:
+// a row of "tab n m s t ? q" told nobody anything, and the help card lists
+// every one of them.
 type abbrev int
 
 const (
@@ -280,13 +287,15 @@ const (
 	// abbrevDims: the dim keys go first. A key that cannot be pressed to any
 	// effect is the first thing to give way when room is short.
 	abbrevDims
-	// abbrevApp: tab, new, settings, theme, help, quit lose their words next.
-	// They are the same on every screen, so they are the ones already known.
+	// abbrevApp: the interface's keys fold to "n new  ? keys".
 	abbrevApp
-	// abbrevTools: update, PR, dev, stop, scroll follow.
+	// abbrevTools: update, PR, dev, stop, scroll lose their words.
 	abbrevTools
-	// abbrevAll: keys only.
+	// abbrevAll: the interface's keys fold to "? keys" alone; the session's
+	// keys still keep their words.
 	abbrevAll
+	// abbrevBare: keys only, the last resort before the bar is cut.
+	abbrevBare
 )
 
 // spellsOut reports whether the option at i keeps its word at this level.
@@ -294,12 +303,15 @@ func (m *Menu) spellsOut(i int, level abbrev) bool {
 	switch level {
 	case abbrevNone, abbrevDims:
 		return true
-	case abbrevAll:
+	case abbrevBare:
 		return false
+	}
+	if m.folds(i, level) {
+		return true // what is left of the app group: "n new", "? keys"
 	}
 	group := m.groupOf(i)
 	if group < 0 || len(m.groups) == 1 {
-		return true
+		return level < abbrevAll
 	}
 	// Groups are session, tools, app, in that order; an absent group shifts the
 	// rest down, so the last group is always the app's and the one before it
@@ -308,7 +320,32 @@ func (m *Menu) spellsOut(i int, level abbrev) bool {
 	if level == abbrevApp {
 		return group != last
 	}
-	return group < last-1
+	return group < last-1 || (len(m.groups) == 2 && group == 0)
+}
+
+// folds reports whether the bar is folding the interface's keys at this
+// level, and option i is one of the two that stand for them.
+func (m *Menu) folds(i int, level abbrev) bool {
+	if !m.foldsApp(level) || m.groupOf(i) != len(m.groups)-1 {
+		return false
+	}
+	k := m.options[i]
+	if k == keys.KeyHelp {
+		return true
+	}
+	if level >= abbrevAll {
+		return false
+	}
+	// With no session the interface's keys are all the bar has, and the ways
+	// to get one -- new, new with a prompt, restore -- are what it is for.
+	return k == keys.KeyNew || (len(m.groups) == 1 && (k == keys.KeyPrompt || k == keys.KeyRestore))
+}
+
+// foldsApp reports whether the interface's keys are folded at this level:
+// only on the main bar, whose last group is the interface's.
+func (m *Menu) foldsApp(level abbrev) bool {
+	return level >= abbrevApp && m.state != StateNewInstance && m.state != StatePrompt &&
+		m.state != StatePane && len(m.groups) > 0
 }
 
 // groupOf returns the index of the group option i belongs to, or -1.
@@ -340,7 +377,7 @@ func (m *Menu) String() string {
 	m.updateOptions()
 
 	rendered := m.renderAt(abbrevNone)
-	for _, level := range []abbrev{abbrevDims, abbrevApp, abbrevTools, abbrevAll} {
+	for _, level := range []abbrev{abbrevDims, abbrevApp, abbrevTools, abbrevAll, abbrevBare} {
 		if m.width <= 0 || lipgloss.Width(rendered) <= m.width {
 			break
 		}
@@ -373,6 +410,11 @@ func (m *Menu) renderAt(level abbrev) string {
 		if dim && level != abbrevNone {
 			continue
 		}
+		// Folded, the interface's group is "n new  ? keys" and then "? keys".
+		if m.foldsApp(level) && m.groupOf(i) == len(m.groups)-1 && !m.folds(i, level) &&
+			!(level == abbrevBare && k == keys.KeyHelp) {
+			continue
+		}
 		if group := m.groupOf(i); wrote > 0 && group != lastGroup {
 			s.WriteString(sepStyle.Render(groupSeparator))
 		} else if wrote > 0 {
@@ -385,6 +427,8 @@ func (m *Menu) renderAt(level abbrev) string {
 		keyText, word := binding.Help().Key, binding.Help().Desc
 		if !m.spellsOut(i, level) {
 			word = ""
+		} else if k == keys.KeyHelp && m.foldsApp(level) {
+			word = "keys" // standing for the keys folded behind it
 		}
 		localKeyStyle, localDescStyle := keyStyle, descStyle
 		if dim {

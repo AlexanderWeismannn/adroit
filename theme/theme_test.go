@@ -2,6 +2,8 @@ package theme
 
 import (
 	"encoding/json"
+	"fmt"
+	"math"
 	"strings"
 	"testing"
 
@@ -143,4 +145,75 @@ func TestNamesLeadsWithDefault(t *testing.T) {
 	require.Equal(t, "default", names[0])
 	require.Len(t, names, len(builtins))
 	require.True(t, strings.Contains(strings.Join(names, ","), "dracula"))
+}
+
+// The terminal background each built-in is drawn on: the theme's own paper
+// where it has one, white and Windows Terminal's default black where it does
+// not. mono is absent on purpose -- it uses the terminal's 0-255 palette, whose
+// colours are whatever the terminal says they are.
+var referenceBackground = map[string]Pair{
+	"default":    {Light: "#ffffff", Dark: "#0c0c0c"},
+	"dracula":    {Light: "#f8f8f2", Dark: "#282a36"},
+	"nord":       {Light: "#eceff4", Dark: "#2e3440"},
+	"gruvbox":    {Light: "#fbf1c7", Dark: "#282828"},
+	"catppuccin": {Light: "#eff1f5", Dark: "#1e1e2e"},
+	"solarized":  {Light: "#fdf6e3", Dark: "#002b36"},
+	"matrix":     {Light: "#ffffff", Dark: "#000000"},
+	"slate":      {Light: "#f6f4ef", Dark: "#14171c"},
+}
+
+// relativeLuminance is WCAG 2's, of a #rrggbb colour.
+func relativeLuminance(t *testing.T, hex string) float64 {
+	t.Helper()
+	var rgb [3]float64
+	for i := range rgb {
+		var v int
+		_, err := fmt.Sscanf(hex[1+2*i:3+2*i], "%02x", &v)
+		require.NoError(t, err, hex)
+		c := float64(v) / 255
+		if c <= 0.03928 {
+			rgb[i] = c / 12.92
+		} else {
+			rgb[i] = math.Pow((c+0.055)/1.055, 2.4)
+		}
+	}
+	return 0.2126*rgb[0] + 0.7152*rgb[1] + 0.0722*rgb[2]
+}
+
+func contrast(t *testing.T, a, b string) float64 {
+	la, lb := relativeLuminance(t, a), relativeLuminance(t, b)
+	return (math.Max(la, lb) + 0.05) / (math.Min(la, lb) + 0.05)
+}
+
+// Every role drawn as text must be readable on the background it is drawn on,
+// in both halves of every built-in, and the selected row's band must be visible
+// against the rows around it. Measured, several were not: dracula's light-half
+// warning was 1.1:1 (yellow on white), nord's 1.6:1, the default's light-half
+// success 2.4:1 and muted 2.6:1, and solarized's selection band was its Subtle
+// colour, 1.15:1 -- the selected row read by its bold title alone.
+func TestEveryBuiltinIsReadable(t *testing.T) {
+	text := []Role{Text, Muted, Accent, Success, Danger, Warning, Info, Special}
+	for _, name := range Names() {
+		if name == "mono" {
+			continue
+		}
+		palette, _ := Builtin(name)
+		bg, ok := referenceBackground[name]
+		require.True(t, ok, "%s has no reference background: add the terminal background it is designed for", name)
+		for _, half := range []struct {
+			name string
+			pick func(Pair) string
+		}{{"light", func(p Pair) string { return p.Light }}, {"dark", func(p Pair) string { return p.Dark }}} {
+			paper := half.pick(bg)
+			for _, role := range text {
+				c := contrast(t, half.pick(palette[role]), paper)
+				require.GreaterOrEqual(t, c, 3.0, "%s %s: %s %s on %s is %.2f:1", name, half.name, role, half.pick(palette[role]), paper, c)
+			}
+			band := half.pick(palette[SelectionBg])
+			c := contrast(t, band, paper)
+			require.GreaterOrEqual(t, c, 1.3, "%s %s: the selection band %s on %s is %.2f:1", name, half.name, band, paper, c)
+			c = contrast(t, half.pick(palette[SelectionFg]), band)
+			require.GreaterOrEqual(t, c, 4.5, "%s %s: selected text on its band is %.2f:1", name, half.name, c)
+		}
+	}
 }

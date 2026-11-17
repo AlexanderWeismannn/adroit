@@ -221,14 +221,14 @@ func (m *home) cancelPromptOverlay(target *session.Instance) tea.Cmd {
 	return m.menuToDefault()
 }
 
-// ---- help: a card of text, dismissed by any key ----
+// ---- help: a card of text, scrolled by the arrows, dismissed by any other key ----
 
 type helpScreen struct {
 	text *overlay.TextOverlay
 }
 
 func (s *helpScreen) resize(m *home, width, height int) {
-	s.text.SetWidth(ui.Layout(width, height, ui.Split).Overlay.W)
+	s.text.SetSize(helpSize(width, height))
 }
 
 func (s *helpScreen) render(m *home) string { return s.text.Render() }
@@ -428,7 +428,7 @@ type settingsScreen struct {
 func (s *settingsScreen) resize(m *home, width, height int) {}
 
 func (s *settingsScreen) render(m *home) string {
-	s.settings.SetWidth(m.termWidth)
+	s.settings.SetSize(m.termWidth, m.termHeight)
 	return s.settings.Render()
 }
 

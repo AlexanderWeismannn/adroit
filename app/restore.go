@@ -85,7 +85,7 @@ func (m *home) openRestorePicker() (tea.Model, tea.Cmd) {
 	}
 	records := m.appState.GetKilledSessions()
 	if len(records) == 0 {
-		return m, m.handleError(fmt.Errorf("no killed sessions to restore"))
+		return m, m.handleNotice("no killed sessions to restore")
 	}
 
 	entries := make([]overlay.RestoreEntry, 0, len(records))
@@ -140,7 +140,7 @@ func (m *home) killedSessionFor(entry overlay.RestoreEntry) (config.KilledSessio
 func (m *home) restoreSession(record config.KilledSession) (tea.Model, tea.Cmd) {
 	if m.list.NumInstances() >= GlobalInstanceLimit {
 		return m, m.handleError(
-			fmt.Errorf("you can't create more than %d instances", GlobalInstanceLimit))
+			fmt.Errorf("you can't create more than %d sessions", GlobalInstanceLimit))
 	}
 
 	program := record.Program

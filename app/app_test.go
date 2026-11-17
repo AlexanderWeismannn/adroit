@@ -1225,7 +1225,7 @@ func TestNewThenTabShowsTheWholeBranchPicker(t *testing.T) {
 		view := h.view()
 		require.Len(t, strings.Split(view, "\n"), size[1], "%dx%d", size[0], size[1])
 		require.Contains(t, view, "No branch (run in the repo itself)", "%dx%d", size[0], size[1])
-		require.Contains(t, view, " Enter ", "%dx%d: the submit button must be on screen", size[0], size[1])
+		require.Contains(t, view, " Send ", "%dx%d: the submit button must be on screen", size[0], size[1])
 	}
 }
 

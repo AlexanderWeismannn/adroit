@@ -393,7 +393,7 @@ func (m *home) updateFromRemote() tea.Cmd {
 			return runUpdateMsg{instance: selected, reset: true}
 		})
 	case !status.Stale():
-		return m.handleError(fmt.Errorf("%q is already up to date with %s", selected.Title, status.Ref))
+		return m.handleNotice(fmt.Sprintf("%q is already up to date with %s", selected.Title, status.Ref))
 	default:
 		message := fmt.Sprintf("Pull %d new commit(s) from %s into %s? They land in a tree the agent may be working in.",
 			status.Behind, status.Ref, selected.Title)

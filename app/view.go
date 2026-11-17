@@ -26,6 +26,7 @@ func (m *home) view() string {
 	// The header carries the counts the list's title used to.
 	m.header.Sessions = m.list.NumInstances()
 	m.header.NeedYou = m.list.AttentionCount()
+	m.list.SetRestorable(m.menu.Restorable())
 	var listAndPreview string
 	switch {
 	case m.layout.Mode == ui.Compact && m.windowFocused:
@@ -40,15 +41,31 @@ func (m *home) view() string {
 		listAndPreview = lipgloss.JoinHorizontal(lipgloss.Top, m.list.String(), m.tabbedWindow.String())
 	}
 
+	// Under an overlay the bar is left empty. The overlay's frame carries its
+	// own keys line, so the bar either repeated it (the prompt's keys were on
+	// screen twice) or, worse, kept advertising the main screen's keys -- ↵ i c
+	// p D live under a kill confirmation that answers none of them.
+	bar := m.menu.String()
+	if m.overlay != nil {
+		bar = lipgloss.Place(m.layout.Bar.W, max(m.layout.Bar.H, 1), lipgloss.Left, lipgloss.Center, "")
+	}
+
 	// Left, not centred: the bar spans the terminal and the panes stop just
 	// short of it, so centring shifted the whole frame right by the difference
 	// and left an unused strip on each side.
+	// So is the notice row: an error left there from before the overlay opened
+	// read as being about the overlay. Overlays report their own errors inside
+	// their frames.
+	notice := m.errBox.String()
+	if m.overlay != nil {
+		notice = lipgloss.Place(max(m.layout.Notice.W, 1), max(m.layout.Notice.H, 1), lipgloss.Left, lipgloss.Center, "")
+	}
 	mainView := lipgloss.JoinVertical(
 		lipgloss.Left,
 		m.header.String(),
 		listAndPreview,
-		m.menu.String(),
-		m.errBox.String(),
+		bar,
+		notice,
 	)
 	mainView = m.fitToTerminal(mainView)
 
