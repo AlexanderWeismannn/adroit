@@ -260,8 +260,8 @@ func (m *home) handleKeyPress(msg tea.KeyPressMsg) (mod tea.Model, cmd tea.Cmd) 
 		return m, m.instanceChanged()
 	case keys.KeySendPrompt:
 		selected := m.list.GetSelectedInstance()
-		if selected == nil || !selected.Started() || selected.Status == session.Paused ||
-			selected.Status == session.Loading {
+		if selected == nil || !selected.Started() || selected.GetStatus() == session.Paused ||
+			selected.GetStatus() == session.Loading {
 			return m, nil
 		}
 		m.menu.SetState(ui.StatePrompt)
@@ -371,7 +371,7 @@ func (m *home) handleKeyPress(msg tea.KeyPressMsg) (mod tea.Model, cmd tea.Cmd) 
 		return m, m.instanceChanged()
 	case keys.KeyKill:
 		selected := m.list.GetSelectedInstance()
-		if selected == nil || selected.Status == session.Loading {
+		if selected == nil || selected.GetStatus() == session.Loading {
 			return m, nil
 		}
 		if m.busy[selected] {
@@ -416,7 +416,7 @@ func (m *home) handleKeyPress(msg tea.KeyPressMsg) (mod tea.Model, cmd tea.Cmd) 
 		return m, m.confirmAction("Kill session", message, "kill", killAction)
 	case keys.KeySubmit:
 		selected := m.list.GetSelectedInstance()
-		if selected == nil || selected.Status == session.Loading {
+		if selected == nil || selected.GetStatus() == session.Loading {
 			return m, nil
 		}
 		// Nothing of this session's own to push: its changes are the user's own
@@ -444,7 +444,7 @@ func (m *home) handleKeyPress(msg tea.KeyPressMsg) (mod tea.Model, cmd tea.Cmd) 
 		return m, m.confirmAction("Push", message, "push", pushAction)
 	case keys.KeyCheckout:
 		selected := m.list.GetSelectedInstance()
-		if selected == nil || selected.Status == session.Loading {
+		if selected == nil || selected.GetStatus() == session.Loading {
 			return m, nil
 		}
 		// Checkout commits the worktree and removes it. There is no worktree here,
@@ -481,7 +481,7 @@ func (m *home) handleKeyPress(msg tea.KeyPressMsg) (mod tea.Model, cmd tea.Cmd) 
 		return m, nil
 	case keys.KeyOpenPR:
 		selected := m.list.GetSelectedInstance()
-		if selected == nil || selected.Status == session.Loading {
+		if selected == nil || selected.GetStatus() == session.Loading {
 			return m, nil
 		}
 		// The key is drawn dim when no pull request is known, and a press on it
@@ -525,7 +525,7 @@ func (m *home) handleKeyPress(msg tea.KeyPressMsg) (mod tea.Model, cmd tea.Cmd) 
 		return m, nil
 	case keys.KeyResume:
 		selected := m.list.GetSelectedInstance()
-		if selected == nil || selected.Status == session.Loading {
+		if selected == nil || selected.GetStatus() == session.Loading {
 			return m, nil
 		}
 		// A resume recreates the worktree (git, which waits on any lock another
@@ -553,7 +553,7 @@ func (m *home) handleKeyPress(msg tea.KeyPressMsg) (mod tea.Model, cmd tea.Cmd) 
 		if selected != nil && selected.Paused() {
 			return m, m.handleNotice(fmt.Sprintf("%q is paused: press r to resume it first", selected.Title))
 		}
-		if selected == nil || selected.Status == session.Loading || !selected.TmuxAlive() {
+		if selected == nil || selected.GetStatus() == session.Loading || !selected.TmuxAlive() {
 			return m, nil
 		}
 		// Terminal tab: attach to terminal session

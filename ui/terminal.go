@@ -104,7 +104,7 @@ func (t *TerminalPane) UpdateContent(instance *session.Instance) error {
 		t.setFallbackState("Select an instance to open a terminal")
 		return nil
 	}
-	if instance.Status == session.Paused {
+	if instance.GetStatus() == session.Paused {
 		t.setFallbackState("Session is paused. Resume to use terminal.")
 		return nil
 	}

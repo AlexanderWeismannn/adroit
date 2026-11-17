@@ -38,7 +38,7 @@ func (m *home) recordKilledSession(instance *session.Instance) {
 
 	record := config.KilledSession{
 		Title:    instance.Title,
-		Branch:   instance.Branch,
+		Branch:   instance.GetBranch(),
 		Program:  instance.Program,
 		RepoPath: instance.Path,
 		KilledAt: time.Now(),

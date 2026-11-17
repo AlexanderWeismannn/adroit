@@ -91,7 +91,7 @@ func (m *home) stopDevStack() tea.Cmd {
 // interval the user most wants to watch.
 func (m *home) startDevStack() tea.Cmd {
 	selected := m.list.GetSelectedInstance()
-	if selected == nil || selected.Status == session.Loading {
+	if selected == nil || selected.GetStatus() == session.Loading {
 		return nil
 	}
 	// Asked of the selected session's repository rather than of the config as a
@@ -104,7 +104,7 @@ func (m *home) startDevStack() tea.Cmd {
 			"no dev stack is configured for %s: add an entry under \"dev_by_repo\" in the Adroit config",
 			filepath.Base(filepath.Clean(repoPath))))
 	}
-	if selected.Status == session.Paused {
+	if selected.GetStatus() == session.Paused {
 		return m.handleError(fmt.Errorf("session %s is paused: resume it before running its stack", selected.Title))
 	}
 
@@ -232,7 +232,7 @@ func (m *home) spinnerNeeded() bool {
 		return true
 	}
 	for _, inst := range m.list.GetInstances() {
-		if inst.Status == session.Loading {
+		if inst.GetStatus() == session.Loading {
 			return true
 		}
 		switch inst.GetActivity() {
@@ -366,7 +366,7 @@ func killDetail(inst *session.Instance) string {
 // outright. Both are stated in the prompt, counted, before anything happens.
 func (m *home) updateFromRemote() tea.Cmd {
 	selected := m.list.GetSelectedInstance()
-	if selected == nil || selected.Status == session.Loading {
+	if selected == nil || selected.GetStatus() == session.Loading {
 		return nil
 	}
 	if !m.appConfig.UpstreamStatusEnabled() {
@@ -417,9 +417,9 @@ func runUpdateCmd(msg runUpdateMsg) tea.Cmd {
 		}
 		repoPath, worktreePath := worktree.GetRepoPath(), worktree.GetWorktreePath()
 		if msg.reset {
-			_, err = upstream.Reset(repoPath, worktreePath, msg.instance.Branch)
+			_, err = upstream.Reset(repoPath, worktreePath, msg.instance.GetBranch())
 		} else {
-			_, err = upstream.Pull(repoPath, worktreePath, msg.instance.Branch)
+			_, err = upstream.Pull(repoPath, worktreePath, msg.instance.GetBranch())
 		}
 		if err != nil {
 			return updateDoneMsg{err: fmt.Errorf("could not update %q: %w", msg.instance.Title, err)}
@@ -516,7 +516,7 @@ func ciStatusFor(instance *session.Instance) ci.Status {
 	}
 	// The recorded branch is only the fallback: ci resolves the worktree's actual
 	// HEAD, so a session whose branch was renamed or switched still finds its PR.
-	return ci.Get(worktree.GetRepoPath(), worktree.GetWorktreePath(), instance.Branch)
+	return ci.Get(worktree.GetRepoPath(), worktree.GetWorktreePath(), instance.GetBranch())
 }
 
 // upstreamStatusFor returns the cached standing of an instance's branch against
@@ -535,5 +535,5 @@ func upstreamStatusFor(instance *session.Instance) upstream.Status {
 	if err != nil {
 		return upstream.Status{}
 	}
-	return upstream.Get(worktree.GetRepoPath(), worktree.GetWorktreePath(), instance.Branch)
+	return upstream.Get(worktree.GetRepoPath(), worktree.GetWorktreePath(), instance.GetBranch())
 }

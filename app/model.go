@@ -454,7 +454,7 @@ func (m *home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		goneAny := false
 		for _, r := range msg.results {
 			// Skip instances that were paused while metadata was being computed
-			if r.instance.Status == session.Paused {
+			if r.instance.GetStatus() == session.Paused {
 				continue
 			}
 			// Where the agent's own interface can be read, believe it. The
@@ -569,7 +569,7 @@ func (m *home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseWheelMsg:
 		// The wheel scrolls the diff/preview pane.
 		selected := m.list.GetSelectedInstance()
-		if selected == nil || selected.Status == session.Paused {
+		if selected == nil || selected.GetStatus() == session.Paused {
 			return m, nil
 		}
 		switch msg.Button {
