@@ -55,8 +55,9 @@ const (
 	Text Role = "text"
 	// Muted is secondary text: paused sessions, hints, branch lines, no-PR.
 	Muted Role = "muted"
-	// Subtle is dimmer than Muted: separators and rules, which should be
-	// present without being read.
+	// Subtle is dimmer than Muted: rules and borders, which should be present
+	// without being read. Never text: it may sit well below 3:1, and
+	// TestEveryBuiltinIsReadable holds only the text roles to that bar.
 	Subtle Role = "subtle"
 	// SelectionBg and SelectionFg are the selected row's own pair. They are
 	// roles rather than a shade of Accent because they must contrast with each

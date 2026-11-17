@@ -20,7 +20,9 @@ func init() { theme.OnChange(applyMenuTheme) }
 func applyMenuTheme() {
 	keyStyle = lipgloss.NewStyle().Bold(true).Foreground(theme.Color(theme.Accent))
 	descStyle = lipgloss.NewStyle().Foreground(theme.Color(theme.Muted))
-	sepStyle = lipgloss.NewStyle().Foreground(theme.Color(theme.Subtle))
+	// Muted, not Subtle: Subtle is for rules, and a separator dot in it was
+	// #dadada on a white terminal -- there, but not legible as a group break.
+	sepStyle = lipgloss.NewStyle().Foreground(theme.Color(theme.Muted))
 }
 
 const (

@@ -237,12 +237,14 @@ func applyRestorePickerTheme() {
 	restoreTitleStyle = lipgloss.NewStyle().
 		Foreground(theme.Color(theme.Accent)).
 		Bold(true)
-	restoreHintStyle = lipgloss.NewStyle().Foreground(theme.Color(theme.Subtle))
+	// Text is never Subtle: that role is for rules, and is unreadable as words
+	// on several palettes (solarized's equals its selection band).
+	restoreHintStyle = lipgloss.NewStyle().Foreground(theme.Color(theme.Muted))
 	restoreRowStyle = lipgloss.NewStyle().Foreground(theme.Color(theme.Muted))
 	restoreSelectedStyle = lipgloss.NewStyle().
 		Foreground(theme.Color(theme.Accent)).
 		Bold(true)
 	restoreMarkerStyle = lipgloss.NewStyle().Foreground(theme.Color(theme.Accent))
-	restoreMetaStyle = lipgloss.NewStyle().Foreground(theme.Color(theme.Subtle))
+	restoreMetaStyle = lipgloss.NewStyle().Foreground(theme.Color(theme.Muted))
 	restoreDetailStyle = lipgloss.NewStyle().Foreground(theme.Color(theme.Muted))
 }

@@ -198,8 +198,9 @@ var (
 			Background(theme.Color(theme.Accent)).
 			Foreground(theme.Color(theme.AccentText))
 
+	// Muted, not Subtle: these are words -- hints, unselected names.
 	bpDimStyle = lipgloss.NewStyle().
-			Foreground(theme.Color(theme.Subtle))
+			Foreground(theme.Color(theme.Muted))
 )
 
 // Render renders the branch picker.
