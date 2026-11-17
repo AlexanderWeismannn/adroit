@@ -13,9 +13,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/AlexanderWeismannn/adroit/cmd"
 	"github.com/AlexanderWeismannn/adroit/config"
 	"github.com/AlexanderWeismannn/adroit/log"
 	"github.com/AlexanderWeismannn/adroit/session"
+	"github.com/AlexanderWeismannn/adroit/session/tmux"
 )
 
 // RunDaemon runs the daemon process which iterates over all sessions and runs AutoYes mode on them.
@@ -39,8 +41,7 @@ func RunDaemon(cfg *config.Config) error {
 
 	pollInterval := time.Duration(cfg.DaemonPollInterval) * time.Millisecond
 
-	// If we get an error for a session, it's likely that we'll keep getting the error. Log every 30 seconds.
-	everyN := log.NewEvery(60 * time.Second)
+	executor := cmd.MakeExecutor()
 
 	wg := &sync.WaitGroup{}
 	wg.Add(1)
@@ -49,16 +50,17 @@ func RunDaemon(cfg *config.Config) error {
 		defer wg.Done()
 		ticker := time.NewTimer(pollInterval)
 		for {
+			// One fork says which panes have drawn anything since they were last
+			// read, so a still session is not captured every poll.
+			seen := tmux.ReadActivity(executor)
 			for _, instance := range instances {
 				// We only store started instances, but check anyway.
 				if instance.Started() && !instance.Paused() {
-					if instance.PollPane().HasPrompt {
+					// Only enter is pressed. A full diff used to follow every
+					// press -- an index copy and an add walk included -- whose
+					// result nothing in this process ever read.
+					if instance.PollPaneSeen(seen).HasPrompt {
 						instance.TapEnter()
-						if err := instance.UpdateDiffStats(); err != nil {
-							if everyN.ShouldLog() {
-								log.WarningLog.Printf("could not update diff stats for %s: %v", instance.Title, err)
-							}
-						}
 					}
 				}
 			}

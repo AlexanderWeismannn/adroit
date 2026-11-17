@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/AlexanderWeismannn/adroit/cmd"
 	"github.com/AlexanderWeismannn/adroit/log"
 	"github.com/AlexanderWeismannn/adroit/session"
 	"github.com/AlexanderWeismannn/adroit/session/ci"
@@ -206,6 +207,11 @@ func tickUpdateMetadataCmd(plans []metadataPlan, ciEnabled, upstreamEnabled bool
 			return metadataUpdateDoneMsg{}
 		}
 
+		// One fork answers "has this pane drawn anything?" for every session, so
+		// only the ones that have are captured. Nil when tmux could not say,
+		// which captures them all.
+		seen := tmux.ReadActivity(cmd.MakeExecutor())
+
 		results := make([]instanceMetaResult, len(plans))
 		var wg sync.WaitGroup
 		for idx, plan := range plans {
@@ -215,7 +221,7 @@ func tickUpdateMetadataCmd(plans []metadataPlan, ciEnabled, upstreamEnabled bool
 				instance := plan.instance
 				r := &results[i]
 				r.instance = instance
-				r.pane = instance.PollPane()
+				r.pane = instance.PollPaneSeen(seen)
 
 				// The capture above is the cheap half of this tick, and it answers
 				// the expensive half's question: a session whose pane has not
