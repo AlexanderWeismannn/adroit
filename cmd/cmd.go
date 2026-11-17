@@ -94,6 +94,15 @@ func IsNoSuchSession(err error) bool {
 		strings.Contains(e.Stderr, "no server running") || strings.Contains(e.Stderr, "session not found"))
 }
 
+// WaitDelay is how long a command's Wait goes on after the command has exited
+// or its context has ended, for whatever it left holding its output.
+//
+// Without one, Wait lasts until every holder of the pipe has closed it. A git
+// killed by its timeout can leave ssh or git-remote-https behind it with the
+// pipe still open, so a timeout of a minute became a wait of however long the
+// network took -- and a cache entry marked as being fetched stayed that way.
+const WaitDelay = 2 * time.Second
+
 // NonInteractiveGit is the environment for a git command run on the user's
 // behalf in the background. Nothing Adroit runs can be answered: its terminal is
 // drawing the interface, so a credential prompt from an expired token or an ssh
@@ -104,7 +113,12 @@ func IsNoSuchSession(err error) bool {
 // GIT_OPTIONAL_LOCKS=0 as well: the status and diff reads on every tick would
 // otherwise take index.lock to refresh the index, racing the agent's own git
 // commands in the same worktree ("index.lock: File exists").
+//
+// It also sets WaitDelay, so a timeout bounds the whole command.
 func NonInteractiveGit(cmd *exec.Cmd) *exec.Cmd {
+	if cmd.WaitDelay == 0 {
+		cmd.WaitDelay = WaitDelay
+	}
 	env := cmd.Env
 	if env == nil {
 		env = os.Environ()
