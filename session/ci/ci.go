@@ -20,6 +20,7 @@ import (
 	adroitcmd "github.com/AlexanderWeismannn/adroit/cmd"
 	"github.com/AlexanderWeismannn/adroit/log"
 	"github.com/AlexanderWeismannn/adroit/session/git"
+	"github.com/AlexanderWeismannn/adroit/session/upstream"
 )
 
 // State is the overall verdict for a branch's CI checks.
@@ -111,6 +112,12 @@ const (
 	// your own gh use; a merged session left in the list used to cost 120 of
 	// them an hour, forever.
 	settledTTL = 10 * time.Minute
+	// noPRTTL is the ttl for a branch with no pull request -- most session
+	// branches, most of the time, and each answer the same heavy query. Asked
+	// every 30 seconds, a list of 25 such branches cost about 1,500 GraphQL
+	// points an hour to keep learning nothing. Pushing the branch, the usual
+	// step before a pull request exists, is noticed sooner: see remoteRef.
+	noPRTTL = 4 * time.Minute
 	// fetchTimeout bounds a single gh invocation so a hung network call cannot
 	// pin a cache entry in the "fetching" state forever.
 	fetchTimeout = 10 * time.Second
@@ -125,14 +132,47 @@ type entry struct {
 	// failing is whether the last lookup failed, so a lookup that keeps failing
 	// is logged when it starts to, not every ttl.
 	failing bool
+	// remoteRef is the branch's remote counterpart, as the upstream package last
+	// measured it, when this verdict was reached. A "no pull request" verdict is
+	// refreshed early when it changes -- the branch was pushed -- rather than
+	// sitting out noPRTTL.
+	remoteRef string
 }
 
 // ttlFor is how long a verdict is served before it is refreshed.
 func ttlFor(s Status) time.Duration {
-	if s.State == StateMerged || s.State == StateClosed {
+	switch s.State {
+	case StateMerged, StateClosed:
 		return settledTTL
+	case StateNoPR:
+		return noPRTTL
 	}
 	return ttl
+}
+
+// due reports whether an entry's verdict should be refreshed. remoteRef is
+// what the upstream package says the branch's remote counterpart is now.
+func (e entry) due(remoteRef string, now time.Time) bool {
+	if e.fetching {
+		return false
+	}
+	if e.status.State == StateNoPR && remoteRef != e.remoteRef {
+		return true
+	}
+	return now.Sub(e.status.FetchedAt) > ttlFor(e.status)
+}
+
+// cannotHavePR reports that a lookup can be skipped: the branch has never had a
+// pull request, and the upstream package -- which fetches the remote every
+// minute -- has measured it and found no remote counterpart. A pull request
+// needs a pushed branch. Only a branch that never had one: a merged branch
+// whose remote was deleted has no counterpart either, and must keep its
+// verdict.
+func cannotHavePR(prev Status, remote upstream.Status) bool {
+	if prev.PRNumber != 0 || (prev.State != StateUnknown && prev.State != StateNoPR) {
+		return false
+	}
+	return !remote.FetchedAt.IsZero() && !remote.Tracked()
 }
 
 var (
@@ -171,7 +211,7 @@ func Get(repoPath, worktreePath, fallbackBranch string) Status {
 		sweepLocked()
 	}
 	e := cache[key]
-	if time.Since(e.status.FetchedAt) > ttlFor(e.status) && !e.fetching {
+	if e.due(upstream.Peek(worktreePath).Ref, time.Now()) {
 		e.fetching = true
 		cache[key] = e
 		go refresh(key, repoPath, worktreePath, fallbackBranch)
@@ -213,6 +253,20 @@ func sweepLocked() {
 // worktree is reflected. The recorded name is the fallback for a detached HEAD or
 // a worktree that has gone away.
 func refresh(key, repoPath, worktreePath, fallbackBranch string) {
+	remote := upstream.Peek(worktreePath)
+	mu.Lock()
+	prev := cache[key].status
+	mu.Unlock()
+	if cannotHavePR(prev, remote) {
+		mu.Lock()
+		e := cache[key]
+		e.fetching, e.failing, e.remoteRef = false, false, remote.Ref
+		e.status = Status{State: StateNoPR, FetchedAt: time.Now()}
+		cache[key] = e
+		mu.Unlock()
+		return
+	}
+
 	branch, err := git.CurrentBranch(worktreePath)
 	if err != nil || branch == "" {
 		branch = fallbackBranch
@@ -252,6 +306,7 @@ func refresh(key, repoPath, worktreePath, fallbackBranch string) {
 	}
 	e.status = status
 	e.failing = false
+	e.remoteRef = remote.Ref
 	cache[key] = e
 }
 

@@ -96,6 +96,14 @@ type Stack struct {
 	// polledAt is when the last poll finished, which paces the steady state --
 	// see steadyInterval.
 	polledAt time.Time
+	// alive is whether the stack's tmux session existed when last looked, which
+	// Poll does off the loop. Snapshot reads only this: it is called on every
+	// render and every tick, and asking tmux there was a fork on the render
+	// goroutine -- under this lock, so a hung tmux froze the interface for the
+	// ten seconds the command takes to time out. checkingAlive keeps the
+	// detached checks from piling up behind such a hang.
+	alive         bool
+	checkingAlive bool
 }
 
 // steadyInterval is how often a stack whose lamps are all up is re-probed.
@@ -212,6 +220,7 @@ func (s *Stack) Adopt(title, worktree, repoPath string) {
 	}
 	s.cfg = cfg
 	s.tmux = ts
+	s.alive = true
 	s.title = title
 	s.worktree = worktree
 	// Seeded now rather than left empty until the first poll: a caller sizing
@@ -252,7 +261,7 @@ func (s *Stack) Snapshot() Status {
 		Phase:    s.phase,
 		Err:      s.err,
 	}
-	st.Running = s.tmux != nil && s.tmux.DoesSessionExist()
+	st.Running = s.tmux != nil && s.alive
 	st.Ready = st.Running && Up(st.Lamps)
 	return st
 }
@@ -330,6 +339,7 @@ func (s *Stack) Stop() error {
 	s.mu.Lock()
 	ts, cfg := s.tmux, s.cfg
 	s.tmux, s.title, s.worktree, s.lamps = nil, "", "", nil
+	s.alive = false
 	s.phase, s.err, s.opened, s.prepared = "", "", false, false
 	s.started = time.Time{}
 	s.mu.Unlock()
@@ -448,6 +458,7 @@ func (s *Stack) Start(title, worktree, repoPath string) error {
 
 	s.mu.Lock()
 	s.tmux = ts
+	s.alive = true
 	s.opened = false
 	s.prepared = false
 	if hasPrepare(cfg) {
@@ -534,6 +545,7 @@ func (s *Stack) Poll() {
 	if !s.Configured() {
 		return
 	}
+	s.checkAlive()
 
 	s.mu.Lock()
 	if s.starting || s.tmux == nil || s.polling {
@@ -619,6 +631,31 @@ func (s *Stack) Poll() {
 			log.WarningLog.Printf("dev stack: could not open %s: %v", url, err)
 		}
 	}
+}
+
+// checkAlive re-reads whether the stack's session exists, for Snapshot. Every
+// poll, ahead of the pacing that skips the probes, so a stack that died is shown
+// down on the next tick whatever its lamps last said.
+func (s *Stack) checkAlive() {
+	s.mu.Lock()
+	ts := s.tmux
+	if ts == nil || s.checkingAlive {
+		s.mu.Unlock()
+		return
+	}
+	s.checkingAlive = true
+	s.mu.Unlock()
+
+	alive := ts.DoesSessionExist()
+
+	s.mu.Lock()
+	s.checkingAlive = false
+	// Only for the session that was asked about: Start or Stop may have
+	// replaced it meanwhile, and they set alive themselves.
+	if s.tmux == ts {
+		s.alive = alive
+	}
+	s.mu.Unlock()
 }
 
 // phasePreparing is what the stack says while its prepare step runs.

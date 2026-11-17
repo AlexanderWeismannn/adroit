@@ -29,7 +29,10 @@ import (
 // notice that the state has changed and sampling should start again.
 const (
 	// paneIntervalLive is the sampling interval while the pane is changing.
-	paneIntervalLive = 100 * time.Millisecond
+	// Five a second, not ten: every changed sample is a full render, and an
+	// agent mid-turn changes its pane on every sample, so ten was ten renders a
+	// second of a pane that reads no differently at five.
+	paneIntervalLive = 200 * time.Millisecond
 	// paneIntervalSettled and paneIntervalIdle are the intervals after the pane
 	// has held still for paneSettledAfter and paneIdleAfter respectively. A
 	// session waiting for its next prompt is most of a list most of the time,

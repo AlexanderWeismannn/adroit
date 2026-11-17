@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/AlexanderWeismannn/adroit/config"
@@ -38,15 +37,10 @@ type GitWorktree struct {
 	// older build, or from a detached checkout, in which case resolveDiffBase
 	// falls back to the repository's default branch.
 	baseBranch string
-	// resolvedBase caches what resolveDiffBase last worked out, and baseMu
-	// guards it: diffs are computed off the main event loop.
-	resolvedBase   string
-	resolvedBaseAt time.Time
-	baseMu         sync.Mutex
-	// privateIndex caches where Adroit's own index for this worktree lives; see
-	// stageUntrackedPrivately.
-	privateIndex string
-	indexMu      sync.Mutex
+	// diff is what the diff path remembers between ticks -- the resolved base,
+	// where the indexes live, what was last staged -- so an unchanged worktree
+	// costs next to nothing to ask again. See diff.go.
+	diff diffState
 	// isExistingBranch is true if the branch existed before the session was created.
 	// When true, the branch will not be deleted on cleanup.
 	isExistingBranch bool

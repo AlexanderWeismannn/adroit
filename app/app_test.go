@@ -1379,3 +1379,11 @@ func TestQuitWaitsForASecondPressWhileWorkIsInFlight(t *testing.T) {
 	h.quitArmed = false
 	require.True(t, quits(press("q")), "with nothing in flight q quits at once")
 }
+
+// The busy spinner sits in a fixed-width column of the list row. A frame two
+// cells wide would shift everything after it on every other frame.
+func TestBusySpinnerFramesAreOneCellWide(t *testing.T) {
+	for _, f := range busySpinner.Frames {
+		require.Equal(t, 1, lipgloss.Width(f), "frame %q", f)
+	}
+}

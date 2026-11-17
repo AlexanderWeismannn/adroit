@@ -212,6 +212,13 @@ type home struct {
 	programOverridden bool
 }
 
+// busySpinner is the busy rows' animation: MiniDot's frames -- each one cell
+// wide -- at five frames a second rather than its twelve. Every frame is a full
+// render of the interface, and while any session was working that was twelve
+// renders a second on top of the pane's own, for a dot nobody needs to see turn
+// faster.
+var busySpinner = spinner.Spinner{Frames: spinner.MiniDot.Frames, FPS: time.Second / 5}
+
 func newHome(ctx context.Context, program string, autoYes bool) *home {
 	// Load application config
 	appConfig := config.LoadConfig()
@@ -234,7 +241,7 @@ func newHome(ctx context.Context, program string, autoYes bool) *home {
 
 	h := &home{
 		ctx:     ctx,
-		spinner: spinner.New(spinner.WithSpinner(spinner.MiniDot)),
+		spinner: spinner.New(spinner.WithSpinner(busySpinner)),
 		menu:    ui.NewMenu(),
 		header:  ui.NewHeader(),
 		side:    ui.NewSide(),
