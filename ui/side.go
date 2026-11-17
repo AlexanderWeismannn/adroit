@@ -171,14 +171,17 @@ func (s *Side) lines() []string {
 
 	// Agent.
 	agent := []string{heading("Agent", "")}
-	state := "not started"
+	state, stateStyle := "not started", sideMutedStyle
 	switch {
 	case i.Status == session.Paused:
-		state = "checked out"
+		// The word the legend and the window footer use for the same state.
+		state = "paused"
 	case i.Status == session.Loading:
 		state = "starting"
 	case i.GetActivity() == session.ActivityNeedsInput:
-		state = "waiting on your answer"
+		// The one state here that is asking you for something: in the colour of
+		// the row's own waiting mark, not muted like the rest of the line.
+		state, stateStyle = "waiting on your answer", ciPendingStyle.Bold(true)
 	case i.GetActivity() == session.ActivityWorking:
 		state = "working"
 	case i.GetActivity() == session.ActivityShell:
@@ -186,8 +189,8 @@ func (s *Side) lines() []string {
 	case i.Started():
 		state = "ready"
 	}
-	line := sideTextStyle.Render(i.Program) + sideMutedStyle.Render(" · "+state)
-	if s.paneRate > 0 && i.Started() && i.Status != session.Paused {
+	line := sideTextStyle.Render(i.Program) + sideMutedStyle.Render(" · ") + stateStyle.Render(state)
+	if Diagnostics && s.paneRate > 0 && i.Started() && i.Status != session.Paused {
 		line += sideMutedStyle.Render(fmt.Sprintf(" · %g/s", s.paneRate))
 	}
 	agent = append(agent, fact(line))

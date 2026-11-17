@@ -412,6 +412,20 @@ func TestListHeaderShowsTheSessionCount(t *testing.T) {
 	require.Contains(t, l.String(), "1/1", "the selection's place in the bottom border")
 }
 
+// The header was cut from the right, so on a narrow terminal with a long branch
+// the count of sessions that need you was the first thing lost. The place gives
+// way first now, and the count survives at every width it can fit in.
+func TestHeaderKeepsTheNeedYouCountWhenNarrow(t *testing.T) {
+	for _, width := range []int{50, 62, 70, 80, 100} {
+		h := NewHeader()
+		h.SetWidth(width)
+		h.Repo, h.Base, h.Mode, h.Sessions, h.NeedYou = "~/postilize", "NO-TASK-shift-tab-redesign", "compact", 15, 2
+		line := plain(h.String())
+		require.Contains(t, line, "2 need you", "width %d: %q", width, line)
+		require.LessOrEqual(t, lipgloss.Width(line), width)
+	}
+}
+
 // The line means something different for a session with no branch: a directory,
 // not a branch. Naming the repository's current HEAD there would claim a branch
 // that is not the session's and can change under it.
@@ -582,19 +596,40 @@ func TestTheSelectedSessionIsAlwaysVisible(t *testing.T) {
 // to be the whole of itself.
 func TestHiddenSessionsAreCounted(t *testing.T) {
 	l := listOfSize(t, 12, 50, 24)
-	l.SetSelectedInstance(6)
+	l.SetSelectedInstance(8)
 	rendered := plain(l.String())
 
-	require.Regexp(t, `↑ \d+ more`, rendered, "sessions above the window must be counted")
-	require.Regexp(t, `↓ \d+ more`, rendered, "sessions below the window must be counted")
+	require.Regexp(t, `\d+ more above`, rendered, "sessions above the window must be counted")
+	require.Regexp(t, `\d+ more below`, rendered, "sessions below the window must be counted")
 
 	// The two counts plus what is drawn must be the whole list.
-	above := regexp.MustCompile(`↑ (\d+) more`).FindStringSubmatch(rendered)
-	below := regexp.MustCompile(`↓ (\d+) more`).FindStringSubmatch(rendered)
+	above := regexp.MustCompile(`(\d+) more above`).FindStringSubmatch(rendered)
+	below := regexp.MustCompile(`(\d+) more below`).FindStringSubmatch(rendered)
 	drawn := strings.Count(rendered, "-a-session")
 	a, _ := strconv.Atoi(above[1])
 	b, _ := strconv.Atoi(below[1])
 	require.Equal(t, 12, a+b+drawn, "counted %d above + %d below + %d drawn", a, b, drawn)
+
+	// "↓ 9 more" hid that one of the nine was stopped on a question for you.
+	l.GetInstances()[11].SetStatus(session.Ready)
+	l.GetInstances()[11].SetActivity(session.ActivityNeedsInput, 0)
+	l.SetSelectedInstance(0)
+	require.Regexp(t, `more below · 1 needs you`, plain(l.String()), "a hidden session waiting on you is not counted on the marker")
+}
+
+// The blank row that separates sessions is not drawn under the last one, and a
+// list scrolled to its top shows one marker, not two: a pane with room left for
+// another whole session must draw it rather than leave the rows blank.
+func TestAScrolledListLeavesNoRoomForAnotherSession(t *testing.T) {
+	for _, height := range []int{30, 24, 20} {
+		l := listOfSize(t, 12, 50, height)
+		rows := strings.Split(plain(l.String()), "\n")
+		blank := 0
+		for i := len(rows) - 2; i > 0 && strings.TrimSpace(strings.Trim(rows[i], "│")) == ""; i-- {
+			blank++
+		}
+		require.Less(t, blank, 3, "height %d: %d blank rows under the marker, room for another session", height, blank)
+	}
 }
 
 // A list that fits must not be scrolled, or it would give up two rows and hide

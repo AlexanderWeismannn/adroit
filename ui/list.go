@@ -1339,13 +1339,36 @@ func emptyListHint(width int) string {
 	}, "\n")
 }
 
-// scrollIndicator styles the "N more" markers that stand in for the rows a pane
-// too short to hold them cannot show.
-func scrollIndicator(arrow string, n int) string {
+// scrollIndicator is the marker that stands in for the sessions a pane too
+// short to hold them cannot show: how many, which way, and how many of them
+// need you. Words rather than an arrow: ↑ and ↓ are the ahead and behind
+// counts on the rows themselves, and "↓ 9 more" said nothing about a hidden
+// row waiting on an answer.
+func scrollIndicator(where string, n, needYou int) string {
 	if n <= 0 {
 		return ""
 	}
-	return pausedStyle.Render(fmt.Sprintf("   %s %d more", arrow, n))
+	text := pausedStyle.Render(fmt.Sprintf("   %d more %s", n, where))
+	if needYou > 0 {
+		verb := "needs"
+		if needYou > 1 {
+			verb = "need"
+		}
+		text += pausedStyle.Render(" · ") + ciPendingStyle.Bold(true).Render(fmt.Sprintf("%d %s you", needYou, verb))
+	}
+	return text
+}
+
+// needYouIn counts the sessions in [from, to) that are waiting on you or have
+// a finish you have not seen.
+func (l *List) needYouIn(from, to int) int {
+	n := 0
+	for idx := from; idx < to; idx++ {
+		if l.wantsAttention(idx) > 0 {
+			n++
+		}
+	}
+	return n
 }
 
 // window picks the run of sessions to draw, keeping the selection in view.
@@ -1464,16 +1487,34 @@ func (l *List) rows(width, height int) string {
 		total += heights[i]
 	}
 
-	budget := height
-	// Two rows held back for the markers, but only when something is going to be
-	// hidden -- otherwise a list that fits exactly would be scrolled for nothing.
-	if total > budget {
-		budget -= 2
+	// The blank that separates one session from the next is not drawn under
+	// the last one, so the window has that row to spare.
+	sep := 1
+	if l.compact {
+		sep = 0
 	}
-
-	start, end := l.window(heights, budget)
+	budget := height + sep
+	// A row held back for each marker, but only when something is going to be
+	// hidden -- otherwise a list that fits exactly would be scrolled for nothing.
+	// Both are held first; a window that turns out to need only one takes the
+	// other row back, unless taking it back would make it need both.
+	start, end := 0, len(l.items)
+	if total > budget {
+		first := l.firstVisible
+		start, end = l.window(heights, budget-2)
+		if start == 0 || end == len(l.items) {
+			again := l.firstVisible
+			l.firstVisible = first
+			s2, e2 := l.window(heights, budget-1)
+			if s2 > 0 && e2 < len(l.items) {
+				l.firstVisible = again
+			} else {
+				start, end = s2, e2
+			}
+		}
+	}
 	if start > 0 {
-		b.WriteString(scrollIndicator("↑", start) + "\n")
+		b.WriteString(scrollIndicator("above", start, l.needYouIn(0, start)) + "\n")
 		l.rowAt = append(l.rowAt, -1)
 	}
 	for i := start; i < end; i++ {
@@ -1491,7 +1532,7 @@ func (l *List) rows(width, height int) string {
 		}
 	}
 	if end < len(l.items) {
-		b.WriteString("\n" + scrollIndicator("↓", len(l.items)-end))
+		b.WriteString("\n" + scrollIndicator("below", len(l.items)-end, l.needYouIn(end, len(l.items))))
 		l.rowAt = append(l.rowAt, -1)
 	}
 	return b.String()

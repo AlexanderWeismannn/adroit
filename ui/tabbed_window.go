@@ -531,7 +531,7 @@ func (w *TabbedWindow) diffSummary() string {
 }
 
 // SetPaneRate records how often the live pane is being sampled, which the
-// footer shows beside "live": the number says the pane is moving.
+// footer shows beside "live" while profiling (see Diagnostics).
 func (w *TabbedWindow) SetPaneRate(perSecond float64) {
 	w.paneRate = perSecond
 }
@@ -546,7 +546,7 @@ func (w *TabbedWindow) SetPaneRate(perSecond float64) {
 // way to tell was to wait and see whether anything moved.
 func (w *TabbedWindow) paneStatus() (text string, style lipgloss.Style) {
 	live := func() (string, lipgloss.Style) {
-		if w.paneRate > 0 {
+		if Diagnostics && w.paneRate > 0 {
 			return fmt.Sprintf("● live · %g/s", w.paneRate), footerLiveStyle
 		}
 		return "● live", footerLiveStyle

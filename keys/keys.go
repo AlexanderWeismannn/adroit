@@ -181,8 +181,11 @@ var Table = []Binding{
 
 	// The jump comes first when it is offered: it is the one entry that says
 	// something about the list rather than the row.
-	{Name: KeyNextAttention, Keys: []string{"]"}, Key: "]", Label: "waiting", Group: GroupSession,
-		Help: "Jump to the next session waiting on you, then the next unseen finish",
+	// "need you" is the header's word for the same set: a question waiting on
+	// your answer, or a finish you have not looked at. "waiting" was the word
+	// for only the first of the two.
+	{Name: KeyNextAttention, Keys: []string{"]"}, Key: "]", Label: "need you", Group: GroupSession,
+		Help: "Jump to the next session that needs you: a question first, then an unseen finish",
 		When: func(c Ctx) bool { return selected(c) && c.Attention }, Lead: always},
 	// Enter does nothing on a paused row (except on the Run tab, where it
 	// attaches to the stack), so it is not offered there: resume is.
