@@ -383,10 +383,11 @@ func TestBranchGlyphIsNotFollowedByAHyphen(t *testing.T) {
 // badge simply goes unexplained — so assert every glyph the list can draw is in
 // it. Add the glyph to BadgeLegend when this fails; do not delete the case.
 func TestBadgeLegendCoversEveryGlyph(t *testing.T) {
-	legend := strings.Join(BadgeLegend(), "\n")
+	legend := strings.Join(BadgeLegend(0), "\n")
 
 	for _, icon := range []string{
-		strings.TrimSpace(readyIcon), strings.TrimSpace(pausedIcon),
+		strings.TrimSpace(readyIcon), strings.TrimSpace(pausedIcon), strings.TrimSpace(notStartedIcon),
+		strings.TrimSpace(unseenIcon), strings.TrimSpace(needsInputChip),
 		spinnerLegendFrame, strings.TrimSpace(doneChip),
 		ciSuccessIcon, ciFailureIcon, ciPendingIcon, ciMergedIcon, ciClosedIcon, ciNoPRIcon,
 		ciConflictIcon, ciChangesIcon, ciApprovedIcon,

@@ -224,14 +224,14 @@ func (m *home) cancelPromptOverlay() tea.Cmd {
 	return m.menuToDefault()
 }
 
-// ---- help: a card of text, dismissed by any key ----
+// ---- help: a card of text, scrolled by the arrows, dismissed by any other key ----
 
 type helpScreen struct {
 	text *overlay.TextOverlay
 }
 
 func (s *helpScreen) resize(m *home, width, height int) {
-	s.text.SetWidth(ui.Layout(width, height, ui.Split).Overlay.W)
+	s.text.SetSize(helpSize(width, height))
 }
 
 func (s *helpScreen) render(m *home) string { return s.text.Render() }

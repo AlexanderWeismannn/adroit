@@ -1809,67 +1809,86 @@ func (l *List) GetInstances() []*session.Instance {
 	return l.items
 }
 
-// BadgeLegend explains the glyph vocabulary used in the instance list.
+// BadgeLegend explains the glyph vocabulary used in the instance list, packed
+// into lines no wider than width: each group of related marks starts a line,
+// and a group too long for one wraps between its entries rather than being cut.
 //
 // It lives here, next to the glyphs and styles it describes, and is exported for
 // the help screen rather than re-spelled there: a legend that names its own
 // colours would drift from the rows it documents the first time one of them
 // changed.
-func BadgeLegend() []string {
+func BadgeLegend(width int) []string {
 	dim := pausedStyle
 	pair := func(style lipgloss.Style, icon, label string) string {
 		return style.Render(icon) + dim.Render("  "+label)
 	}
-	sep := dim.Render("    ")
-
-	return []string{
-		strings.Join([]string{
+	groups := [][]string{
+		{
 			pair(readyStyle, strings.TrimSpace(readyIcon), "ready"),
 			pair(pausedStyle, strings.TrimSpace(pausedIcon), "paused"),
-		}, sep),
-		strings.Join([]string{
+			pair(pausedStyle, strings.TrimSpace(notStartedIcon), "not started, or PR settled"),
+		},
+		{
 			// One frame of the animation, twice. The two states differ only in
 			// colour, which is exactly the thing a legend is for.
 			pair(workingStyle, spinnerLegendFrame, "agent working"),
 			pair(shellStyle, spinnerLegendFrame, "shell still running"),
-		}, sep),
-		strings.Join([]string{
-			doneChipStyle.Render(doneChip) + dim.Render("  just finished"),
+		},
+		{
+			doneChipStyle.Render(doneChip) + dim.Render(" just finished"),
 			pair(unseenStyle, strings.TrimSpace(unseenIcon), "finished, not looked at yet"),
-		}, sep),
-		needsInputChipStyle.Render(needsInputChip) + dim.Render("  waiting on your answer"),
-		strings.Join([]string{
+		},
+		{needsInputChipStyle.Render(needsInputChip) + dim.Render(" waiting on your answer")},
+		{
 			pair(pausedStyle, branchIcon, "branch in its own worktree"),
 			pair(pausedStyle, repoIcon, "runs in the repo itself"),
-		}, sep),
-		strings.Join([]string{
+		},
+		{
 			pair(addedLinesStyle, lampUpGlyph, "dev stack up here"),
 			pair(ciPendingStyle, lampPendingGlyph, "starting"),
 			pair(removedLinesStyle, lampDownGlyph, "down"),
 			pair(ageStyle, "2h", "quiet for that long"),
-		}, sep),
-		strings.Join([]string{
+		},
+		{
 			pair(addedLinesStyle, ciSuccessIcon, "CI passed"),
 			pair(removedLinesStyle, ciFailureIcon, "CI failed"),
 			pair(ciPendingStyle, ciPendingIcon, "CI running"),
-		}, sep),
-		strings.Join([]string{
+		},
+		{
 			pair(ciMergedStyle, ciMergedIcon, "merged"),
 			pair(pausedStyle, ciClosedIcon, "closed"),
 			pair(pausedStyle, ciNoPRIcon, "no PR"),
-		}, sep),
-		strings.Join([]string{
+		},
+		{
 			pair(ciPendingStyle, upstreamBehindIcon, "behind the remote"),
 			pair(pausedStyle, upstreamAheadIcon, "commits not pushed"),
 			// Diverged is not a glyph of its own any more: it is both counts, each
 			// behind its own arrow, which is the only form that says which is which.
 			pair(removedLinesStyle, upstreamAheadIcon+"n "+upstreamBehindIcon+"n", "diverged from it"),
-		}, sep),
-		strings.Join([]string{
+		},
+		{
 			pair(addedLinesStyle, ciApprovedIcon, "approved"),
 			pair(removedLinesStyle, ciChangesIcon, "changes requested"),
 			pair(removedLinesStyle, ciConflictIcon, "merge conflict"),
 			pair(ciPendingStyle, ciCommentIcon, "comments"),
-		}, sep),
+		},
 	}
+	const sep = "    "
+	var out []string
+	for _, group := range groups {
+		line := ""
+		for _, entry := range group {
+			switch {
+			case line == "":
+				line = entry
+			case width > 0 && lipgloss.Width(line)+len(sep)+lipgloss.Width(entry) > width:
+				out = append(out, line)
+				line = entry
+			default:
+				line += sep + entry
+			}
+		}
+		out = append(out, line)
+	}
+	return out
 }
