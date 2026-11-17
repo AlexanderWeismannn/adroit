@@ -752,6 +752,16 @@ func parseActivity(out string) Activity {
 	return seen
 }
 
+// StillFor is how long the session has gone without drawing anything, and
+// false when the activity does not cover it.
+func (a Activity) StillFor(t *TmuxSession, now time.Time) (time.Duration, bool) {
+	obs, ok := a[t.sanitizedName]
+	if !ok {
+		return 0, false
+	}
+	return max(now.Sub(time.Unix(obs.last, 0)), 0), true
+}
+
 // paneProbeFloor is the longest a pane goes uncaptured on the strength of tmux
 // saying it is still. The activity rule is exact for output; the floor is for
 // whatever changes a pane without either -- and a still session costs one

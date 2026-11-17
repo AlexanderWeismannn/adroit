@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"hash/fnv"
 	"os"
 	"sync"
 	"time"
@@ -77,6 +78,13 @@ type metadataPlan struct {
 	diffDue bool
 	// diffAllowed is true when enough time has passed to honour a changed pane.
 	diffAllowed bool
+	// diffDueStill replaces diffDue for a session whose pane has been still for
+	// diffStillAfter: the same question asked with the longer diffMaxAgeStill.
+	// The tick, not the plan, learns whether the pane is still -- from the
+	// activity it reads for every session at once.
+	diffDueStill bool
+	// selected is the session under the cursor, which never backs off.
+	selected bool
 	// stageUntracked is true when this diff should also pay for the untracked
 	// walk.
 	stageUntracked bool
@@ -116,7 +124,29 @@ const (
 	// switching a branch inside a worktree is legitimate but rare, and the name
 	// is only used for display.
 	branchMaxAge = 30 * time.Second
+	// diffStillAfter and diffMaxAgeStill back the floor off for a session that
+	// has drawn nothing for a minute. Its counts can only move by something
+	// writing to the worktree with no output to show for it -- the case the floor
+	// exists for, and rare -- and a list of idle sessions re-diffing every 10s was
+	// most of the git the tick ran. A commit or an add with nothing on screen is
+	// still caught at once: WorktreeChanged watches HEAD and the index without
+	// forking.
+	diffStillAfter  = time.Minute
+	diffMaxAgeStill = time.Minute
+	// metadataParallelism caps how many sessions one tick works on at once. Every
+	// slot forks git and tmux, and a list of 25 started at once was 25 parallel
+	// `git add -N` walks contending for the same disk.
+	metadataParallelism = 4
 )
+
+// untrackedStagger spreads the sessions' untracked walks across the period
+// instead of letting every session started together stage together forever:
+// each session's period is lengthened by its own fixed fraction of it.
+func untrackedStagger(inst *session.Instance) time.Duration {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(inst.Title))
+	return time.Duration(h.Sum32()%1000) * untrackedMaxAge / 2000
+}
 
 // offLoop runs work that shells out to git and tmux as a Cmd, off the update
 // loop, marking the session busy until its message comes back. A session that
@@ -172,10 +202,12 @@ func (m *home) planMetadata(active []*session.Instance) []metadataPlan {
 		}
 		plans = append(plans, metadataPlan{
 			instance:       inst,
+			selected:       inst == selected,
 			diffDue:        inst.DiffStale(maxAge, wantContent),
+			diffDueStill:   inst.DiffStale(diffMaxAgeStill, wantContent),
 			diffAllowed:    inst.DiffStale(cooldown, wantContent),
 			wantContent:    wantContent,
-			stageUntracked: inst.UntrackedStale(untrackedMaxAge),
+			stageUntracked: inst.UntrackedStale(untrackedMaxAge + untrackedStagger(inst)),
 			branchDue:      inst.BranchStale(branchMaxAge),
 		})
 	}
@@ -211,24 +243,35 @@ func tickUpdateMetadataCmd(plans []metadataPlan, ciEnabled, upstreamEnabled bool
 		// only the ones that have are captured. Nil when tmux could not say,
 		// which captures them all.
 		seen := tmux.ReadActivity(cmd.MakeExecutor())
+		now := time.Now()
 
 		results := make([]instanceMetaResult, len(plans))
+		sem := make(chan struct{}, metadataParallelism)
 		var wg sync.WaitGroup
 		for idx, plan := range plans {
 			wg.Add(1)
 			go func(i int, plan metadataPlan) {
 				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
 				instance := plan.instance
 				r := &results[i]
 				r.instance = instance
 				r.pane = instance.PollPaneSeen(seen)
 
+				// A session that has been still for a while backs its floor off,
+				// unless git itself says the worktree moved.
+				diffDue := plan.diffDue
+				if still, ok := instance.PaneStillFor(seen, now); ok && !plan.selected && still >= diffStillAfter {
+					diffDue = plan.diffDueStill || instance.WorktreeChanged()
+				}
+
 				// The capture above is the cheap half of this tick, and it answers
 				// the expensive half's question: a session whose pane has not
 				// changed has almost certainly not written to disk either, so the
-				// diff it produced last time still stands. plan.diffDue is the
-				// floor under that inference.
-				if plan.diffDue || (r.pane.Updated && plan.diffAllowed) {
+				// diff it produced last time still stands. diffDue is the floor
+				// under that inference.
+				if diffDue || (r.pane.Updated && plan.diffAllowed) {
 					r.diffComputed = true
 					r.diffContent = plan.wantContent
 					r.diffUntracked = plan.stageUntracked
