@@ -10,7 +10,7 @@ import (
 // whole list: a session whose pane has drawn nothing since its last capture is
 // not captured again. seen may be nil, which captures as PollPane does.
 func (i *Instance) PollPaneSeen(seen tmux.Activity) tmux.PaneState {
-	if !i.started || i.Status == Paused {
+	if !i.Started() || i.status() == Paused {
 		return tmux.PaneState{}
 	}
 	return i.tmuxSession.PollPaneSeen(seen)
@@ -19,7 +19,7 @@ func (i *Instance) PollPaneSeen(seen tmux.Activity) tmux.PaneState {
 // PaneStillFor is how long this session's pane has gone without drawing
 // anything, by the same activity. False when that is not known.
 func (i *Instance) PaneStillFor(seen tmux.Activity, now time.Time) (time.Duration, bool) {
-	if !i.started || i.tmuxSession == nil {
+	if !i.Started() || i.tmuxSession == nil {
 		return 0, false
 	}
 	return seen.StillFor(i.tmuxSession, now)
@@ -29,8 +29,14 @@ func (i *Instance) PaneStillFor(seen tmux.Activity, now time.Time) (time.Duratio
 // in this session's worktree -- a commit, an add, a checkout -- since its diff
 // was last computed. False for a session with no worktree of its own.
 func (i *Instance) WorktreeChanged() bool {
-	if !i.started || i.gitWorktree == nil {
+	if !i.Started() {
 		return false
 	}
-	return i.gitWorktree.ChangedSinceDiff()
+	i.mu.RLock()
+	worktree := i.gitWorktree
+	i.mu.RUnlock()
+	if worktree == nil {
+		return false
+	}
+	return worktree.ChangedSinceDiff()
 }

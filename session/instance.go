@@ -1113,32 +1113,6 @@ func (i *Instance) Resume() error {
 	return nil
 }
 
-// UpdateDiffStats updates the git diff statistics for this instance
-func (i *Instance) UpdateDiffStats() error {
-	if !i.Started() || i.gitWorktree == nil {
-		i.diffStats = nil
-		return nil
-	}
-
-	if i.status() == Paused {
-		// Keep the previous diff stats if the instance is paused
-		return nil
-	}
-
-	stats := i.gitWorktree.Diff()
-	if stats.Error != nil {
-		if strings.Contains(stats.Error.Error(), "base commit SHA not set") {
-			// Worktree is not fully set up yet, not an error
-			i.diffStats = nil
-			return nil
-		}
-		return fmt.Errorf("failed to get diff stats: %w", stats.Error)
-	}
-
-	i.diffStats = stats
-	return nil
-}
-
 // ComputeDiff runs the expensive git diff I/O and returns the result without
 // mutating instance state. Safe to call from a background goroutine.
 func (i *Instance) ComputeDiff() *git.DiffStats {
@@ -1172,13 +1146,6 @@ func (i *Instance) SetDiffStats(stats *git.DiffStats, hasContent bool) {
 	i.diffStats = stats
 	i.diffStatsAt = time.Now()
 	i.diffStatsHasContent = hasContent && stats != nil
-}
-
-// DiffStatsAt is when the current diff stats were computed. Exact identity for
-// anything that caches a rendering of them: the timestamp only moves when the
-// stats were actually recomputed.
-func (i *Instance) DiffStatsAt() time.Time {
-	return i.diffStatsAt
 }
 
 // UntrackedStale reports whether the next diff should pay for the untracked-file

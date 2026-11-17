@@ -458,21 +458,6 @@ func TestDiffStaleness(t *testing.T) {
 	require.True(t, inst.DiffStale(0, false))
 }
 
-// A recompute is what moves the stamp, which is how the diff pane knows it can
-// keep the rendering it already built.
-func TestDiffStatsAtMovesOnlyOnRecompute(t *testing.T) {
-	inst, err := NewInstance(InstanceOptions{Title: "a", Path: ".", Program: "echo"})
-	require.NoError(t, err)
-	require.True(t, inst.DiffStatsAt().IsZero())
-
-	inst.SetDiffStats(&git.DiffStats{Added: 1}, false)
-	first := inst.DiffStatsAt()
-	require.False(t, first.IsZero())
-
-	inst.SetDiffStats(&git.DiffStats{Added: 2}, false)
-	require.True(t, inst.DiffStatsAt().After(first) || inst.DiffStatsAt().Equal(first))
-}
-
 func TestBranchStaleness(t *testing.T) {
 	inst, err := NewInstance(InstanceOptions{Title: "a", Path: ".", Program: "echo"})
 	require.NoError(t, err)
