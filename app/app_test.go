@@ -1237,3 +1237,11 @@ func TestMetadataTickRefreshesTheSelectedSessionsKeys(t *testing.T) {
 	require.NotContains(t, h.menu.Dimmed(), keys.KeyOpenPR,
 		"the tick found a pull request; the menu still offers the key as dim")
 }
+
+// The busy spinner sits in a fixed-width column of the list row. A frame two
+// cells wide would shift everything after it on every other frame.
+func TestBusySpinnerFramesAreOneCellWide(t *testing.T) {
+	for _, f := range busySpinner.Frames {
+		require.Equal(t, 1, lipgloss.Width(f), "frame %q", f)
+	}
+}
