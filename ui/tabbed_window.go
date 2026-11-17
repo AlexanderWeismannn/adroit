@@ -562,26 +562,29 @@ func (w *TabbedWindow) paneStatus() (text string, style lipgloss.Style) {
 		if w.instance == nil || w.preview.isScrolling || !w.instance.Started() {
 			return "", tabLabelStyle
 		}
+		// The list's own paused mark. It was ⏸ (U+23F8), and ↕ marked a scrolled
+		// pane: both carry an emoji presentation, which Windows Terminal can draw
+		// two cells wide while the width accounting counts one.
 		if w.instance.Status == session.Paused {
-			return "⏸ paused · r resumes", footerPausedStyle
+			return "○ paused · r resumes", footerPausedStyle
 		}
 		return live()
 	case DiffTab:
 		summary := w.diffSummary()
 		if w.diff.IsScrolling() {
-			return strings.TrimSpace("↕ scrolled · " + summary), tabLabelStyle
+			return strings.TrimSpace("scrolled · " + summary), tabLabelStyle
 		}
 		return summary, tabLabelStyle
 	case TerminalTab:
 		if w.terminal.IsScrolling() {
-			return "↕ scrolled", tabLabelStyle
+			return "scrolled", tabLabelStyle
 		}
 		if w.instance != nil && w.instance.Started() && w.instance.Status != session.Paused {
 			return live()
 		}
 	case RunTab:
 		if w.run.IsScrolling() {
-			return "↕ scrolled", tabLabelStyle
+			return "scrolled", tabLabelStyle
 		}
 		if w.run.running() {
 			return live()

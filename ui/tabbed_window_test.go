@@ -213,7 +213,7 @@ func TestTheFooterSaysWhetherThePaneIsLive(t *testing.T) {
 	require.NoError(t, err)
 	w.SetInstance(inst)
 	status, _ = w.paneStatus()
-	require.Equal(t, "⏸ paused · r resumes", status)
+	require.Equal(t, "○ paused · r resumes", status)
 
 	w.activeTab = DiffTab
 	status, _ = w.paneStatus()
@@ -225,7 +225,7 @@ func TestTheFooterSaysWhetherThePaneIsLive(t *testing.T) {
 	lines := strings.Split(w.String(), "\n")
 	require.Len(t, lines, 20)
 	require.Equal(t, lipgloss.Width(lines[1]), lipgloss.Width(lines[len(lines)-1]))
-	require.True(t, strings.HasPrefix(plain(lines[len(lines)-1]), "╰─ ⏸ paused · r resumes "), plain(lines[len(lines)-1]))
+	require.True(t, strings.HasPrefix(plain(lines[len(lines)-1]), "╰─ ○ paused · r resumes "), plain(lines[len(lines)-1]))
 	require.True(t, strings.HasSuffix(plain(lines[len(lines)-1]), "╯"))
 }
 
