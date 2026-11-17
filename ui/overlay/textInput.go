@@ -443,18 +443,20 @@ func (t *TextInputOverlay) render() string {
 		content += tiErrorStyle.Render("✗ "+t.errMsg) + "\n\n"
 	}
 
-	// Render enter button with appropriate style
-	enterButton := " Enter "
+	// The button names what it does, not a key: it said "Enter", while ↵ in
+	// the prompt -- the field you are in -- inserts a line break. ↵ presses it
+	// once tab has reached it, and ctrl+s sends from any field.
+	button := " Send "
 	if t.isEnterButton() {
-		enterButton = tiFocusedButtonStyle.Render(enterButton)
+		button = tiFocusedButtonStyle.Render(button) + tiButtonStyle.Render("  ↵ to send")
 	} else {
-		enterButton = tiButtonStyle.Render(enterButton)
+		button = tiButtonStyle.Render(button)
 	}
-	content += enterButton
+	content += button
 
-	footer := Keys(Key{"ctrl+s", "submit"}, Key{"esc", "cancel"})
+	footer := Keys(Key{"ctrl+s", "send"}, Key{"esc", "cancel"})
 	if t.numStops > 2 {
-		footer = Keys(Key{"tab", "next field"}, Key{"ctrl+s", "submit"}, Key{"esc", "cancel"})
+		footer = Keys(Key{"ctrl+s", "send"}, Key{"tab", "next field"}, Key{"esc", "cancel"})
 	}
 	return Frame(t.width, t.Title, content, footer, theme.Color(theme.Accent))
 }

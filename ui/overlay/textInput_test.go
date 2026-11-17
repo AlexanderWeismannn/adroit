@@ -54,8 +54,8 @@ func TestBranchPickerAnnouncesItself(t *testing.T) {
 
 	o.FocusBranchPicker()
 	focused := o.Render()
-	require.Contains(t, focused, "filter ·")
-	require.Contains(t, focused, "ctrl+s start")
+	require.Contains(t, focused, "type to filter")
+	require.Contains(t, focused, "↵ choose")
 	require.NotContains(t, focused, "tab to choose an existing branch",
 		"once focused, the hint to reach it is stale")
 }

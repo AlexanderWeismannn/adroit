@@ -150,7 +150,7 @@ func (t *ThemePicker) Render() string {
 	}
 
 	return Frame(lipgloss.Width(body.String())+6, "Theme",
-		body.String(), Keys(Key{"↑↓", "preview"}, Key{"enter", "keep"}, Key{"esc", "cancel"}), theme.Color(theme.Accent))
+		body.String(), Keys(Key{"↑↓", "preview"}, Key{"↵", "keep"}, Key{"esc", "cancel"}), theme.Color(theme.Accent))
 }
 
 func padRight(s string, width int) string {

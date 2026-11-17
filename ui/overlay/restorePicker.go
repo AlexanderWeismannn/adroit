@@ -108,7 +108,7 @@ const maxRestoreRows = 8
 
 func (r *RestorePicker) Render() string {
 	var body strings.Builder
-	footer := Keys(Key{"↑↓", "select"}, Key{"enter", "restore"}, Key{"esc", "cancel"})
+	footer := Keys(Key{"↑↓", "select"}, Key{"↵", "restore"}, Key{"esc", "cancel"})
 
 	if len(r.entries) == 0 {
 		body.WriteString(restoreHintStyle.Render("Nothing to restore — no session has been killed yet."))

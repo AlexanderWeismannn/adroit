@@ -431,7 +431,7 @@ type settingsScreen struct {
 func (s *settingsScreen) resize(m *home, width, height int) {}
 
 func (s *settingsScreen) render(m *home) string {
-	s.settings.SetWidth(m.termWidth)
+	s.settings.SetSize(m.termWidth, m.termHeight)
 	return s.settings.Render()
 }
 

@@ -30,3 +30,30 @@ func TestHelpCardFitsAndScrollsToItsLastKey(t *testing.T) {
 		require.Contains(t, ansi.Strip(h.view()), "Quit the application", "%dx%d: the last key is unreachable", size[0], size[1])
 	}
 }
+
+// Under an overlay the bar is empty: it kept advertising the main screen's
+// keys -- ↵ attach, i prompt, D kill -- under a kill confirmation that answers
+// none of them, and repeated the prompt overlay's own keys line.
+func TestTheBarIsEmptyUnderAnOverlay(t *testing.T) {
+	h := newSizedHome(t, 100, 30)
+	bar := func() string {
+		rows := strings.Split(ansi.Strip(h.view()), "\n")
+		return rows[h.layout.Bar.Y]
+	}
+	require.Contains(t, bar(), "new", "the bar names the main screen's keys with no overlay open")
+	h.confirmAction("Kill session", "Kill TASK-5700-session?", "kill", nil)
+	require.Empty(t, strings.TrimSpace(bar()), "the main screen's keys are live under the dialog")
+}
+
+// The settings box keeps clear of the bar: at 24 rows its fixed sixteen-line
+// body pushed it, keys line and all, over the bar.
+func TestSettingsFitAShortTerminal(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	h := newSizedHome(t, 70, 24)
+	h.openSettings()
+	rows := strings.Split(ansi.Strip(h.view()), "\n")
+	for _, row := range rows[h.layout.Bar.Y:] {
+		require.NotContains(t, row, "╯", "the settings box runs into the bar: %q", row)
+		require.NotContains(t, row, "│", "the settings box runs into the bar: %q", row)
+	}
+}

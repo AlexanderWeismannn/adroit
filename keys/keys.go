@@ -293,7 +293,7 @@ var Table = []Binding{
 	{Name: KeySubmitName, Key: "↵", Label: "submit name", Group: GroupNaming},
 	{Name: KeyPickBranch, Key: "tab", Label: "pick branch", Group: GroupNaming},
 	{Name: KeyNextField, Key: "tab", Label: "next field", Group: GroupPrompt},
-	{Name: KeyConfirm, Key: "ctrl+s", Label: "submit", Group: GroupPrompt},
+	{Name: KeyConfirm, Key: "ctrl+s", Label: "send", Group: GroupPrompt},
 	{Name: KeyCancel, Key: "esc", Label: "cancel", Group: GroupOverlay},
 
 	// The bar while the window owns the keyboard.

@@ -169,7 +169,7 @@ func TestOverlayMenusNameTheirKeys(t *testing.T) {
 		want  []string
 	}{
 		{"naming a session", StateNewInstance, []string{"tab", "pick branch", "esc", "cancel"}},
-		{"the prompt overlay", StatePrompt, []string{"tab", "next field", "ctrl+s", "submit", "esc", "cancel"}},
+		{"the prompt overlay", StatePrompt, []string{"tab", "next field", "ctrl+s", "send", "esc", "cancel"}},
 	}
 
 	for _, tt := range tests {

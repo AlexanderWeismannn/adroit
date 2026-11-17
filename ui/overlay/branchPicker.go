@@ -214,7 +214,7 @@ func (bp *BranchPicker) Render() string {
 	if bp.focused {
 		cursor := bp.filter + "█"
 		s.WriteString(bpFilterStyle.Render(" (filter: " + cursor + ")"))
-		s.WriteString(bpDimStyle.Render("   filter · ↑↓ select · enter choose · ctrl+s start"))
+		s.WriteString(bpDimStyle.Render("   type to filter   ↑↓ select   ↵ choose"))
 	} else {
 		if bp.filter != "" {
 			s.WriteString(bpDimStyle.Render(" (filter: " + bp.filter + ")"))

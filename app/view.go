@@ -40,6 +40,15 @@ func (m *home) view() string {
 		listAndPreview = lipgloss.JoinHorizontal(lipgloss.Top, m.list.String(), m.tabbedWindow.String())
 	}
 
+	// Under an overlay the bar is left empty. The overlay's frame carries its
+	// own keys line, so the bar either repeated it (the prompt's keys were on
+	// screen twice) or, worse, kept advertising the main screen's keys -- ↵ i c
+	// p D live under a kill confirmation that answers none of them.
+	bar := m.menu.String()
+	if m.overlay != nil {
+		bar = lipgloss.Place(m.layout.Bar.W, max(m.layout.Bar.H, 1), lipgloss.Left, lipgloss.Center, "")
+	}
+
 	// Left, not centred: the bar spans the terminal and the panes stop just
 	// short of it, so centring shifted the whole frame right by the difference
 	// and left an unused strip on each side.
@@ -47,7 +56,7 @@ func (m *home) view() string {
 		lipgloss.Left,
 		m.header.String(),
 		listAndPreview,
-		m.menu.String(),
+		bar,
 		m.errBox.String(),
 	)
 	mainView = m.fitToTerminal(mainView)
