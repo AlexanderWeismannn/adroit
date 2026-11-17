@@ -1515,21 +1515,31 @@ func (l *List) rows(width, height int) string {
 
 	var b strings.Builder
 	l.rowAt = l.rowAt[:0]
-	rendered := make([]string, len(l.items))
+	// Every row is the same height -- one line compact, two otherwise -- so the
+	// window is chosen before anything is drawn, and only the rows in it are.
+	// Rendering a row costs tens of microseconds, and a list of 25 drew all of
+	// them on every frame to show nine.
+	rowLines := 2
+	if l.compact {
+		rowLines = 1
+	}
 	heights := make([]int, len(l.items))
 	total := 0
-	for i, item := range l.items {
-		if l.compact {
-			rendered[i] = l.renderer.RenderCompact(item, i == l.selectedIdx, i == len(l.items)-1)
-			heights[i] = 1
-		} else {
-			rendered[i] = l.renderer.Render(item, i+1, i == l.selectedIdx, len(l.repos) > 1, i == len(l.items)-1)
+	for i := range l.items {
+		heights[i] = rowLines
+		if !l.compact {
 			// The blank line that separates one session from the next belongs to
 			// the session above it, so a window's height is the sum of what it
 			// draws.
-			heights[i] = strings.Count(rendered[i], "\n") + 2
+			heights[i]++
 		}
 		total += heights[i]
+	}
+	render := func(i int) string {
+		if l.compact {
+			return l.renderer.RenderCompact(l.items[i], i == l.selectedIdx, i == len(l.items)-1)
+		}
+		return l.renderer.Render(l.items[i], i+1, i == l.selectedIdx, len(l.repos) > 1, i == len(l.items)-1)
 	}
 
 	// The blank that separates one session from the next is not drawn under
@@ -1563,8 +1573,9 @@ func (l *List) rows(width, height int) string {
 		l.rowAt = append(l.rowAt, -1)
 	}
 	for i := start; i < end; i++ {
-		b.WriteString(rendered[i])
-		for n := strings.Count(rendered[i], "\n") + 1; n > 0; n-- {
+		row := render(i)
+		b.WriteString(row)
+		for n := strings.Count(row, "\n") + 1; n > 0; n-- {
 			l.rowAt = append(l.rowAt, i)
 		}
 		if i != end-1 {
