@@ -90,7 +90,7 @@ func (t *TerminalPane) UpdateContent(instance *session.Instance) error {
 	defer t.mu.Unlock()
 
 	if instance == nil {
-		t.setFallbackState("Select an instance to open a terminal")
+		t.setFallbackState("Select a session to open a terminal")
 		return nil
 	}
 	if instance.Status == session.Paused {

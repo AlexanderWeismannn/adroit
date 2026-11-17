@@ -101,7 +101,7 @@ func (m *home) handleKeyPress(msg tea.KeyPressMsg) (mod tea.Model, cmd tea.Cmd) 
 		// Start the instance (enable previews etc) and go back to the main menu state.
 		case tea.KeyEnter:
 			if len(instance.Title) == 0 {
-				return m, m.handleError(fmt.Errorf("title cannot be empty"))
+				return m, m.handleError(fmt.Errorf("name cannot be empty"))
 			}
 			if err := titleCollision(instance, m.list.GetInstances()); err != nil {
 				return m, m.handleError(err)
@@ -146,7 +146,7 @@ func (m *home) handleKeyPress(msg tea.KeyPressMsg) (mod tea.Model, cmd tea.Cmd) 
 				return m, nil
 			}
 			if ansi.StringWidth(instance.Title) >= 32 {
-				return m, m.handleError(fmt.Errorf("title cannot be longer than 32 characters"))
+				return m, m.handleError(fmt.Errorf("name cannot be longer than 32 characters"))
 			}
 			if err := instance.SetTitle(instance.Title + msg.Text); err != nil {
 				return m, m.handleError(err)
@@ -274,7 +274,7 @@ func (m *home) handleKeyPress(msg tea.KeyPressMsg) (mod tea.Model, cmd tea.Cmd) 
 	case keys.KeyPrompt:
 		if m.list.NumInstances() >= GlobalInstanceLimit {
 			return m, m.handleError(
-				fmt.Errorf("you can't create more than %d instances", GlobalInstanceLimit))
+				fmt.Errorf("you can't create more than %d sessions", GlobalInstanceLimit))
 		}
 
 		// Start a background fetch so branches are up to date by the time the picker opens
@@ -303,7 +303,7 @@ func (m *home) handleKeyPress(msg tea.KeyPressMsg) (mod tea.Model, cmd tea.Cmd) 
 	case keys.KeyNew:
 		if m.list.NumInstances() >= GlobalInstanceLimit {
 			return m, m.handleError(
-				fmt.Errorf("you can't create more than %d instances", GlobalInstanceLimit))
+				fmt.Errorf("you can't create more than %d sessions", GlobalInstanceLimit))
 		}
 		instance, err := session.NewInstance(session.InstanceOptions{
 			Title:   "",
@@ -398,7 +398,7 @@ func (m *home) handleKeyPress(msg tea.KeyPressMsg) (mod tea.Model, cmd tea.Cmd) 
 				}
 
 				if checkedOut {
-					return fmt.Errorf("instance %s is currently checked out", selected.Title)
+					return fmt.Errorf("session %s is currently checked out", selected.Title)
 				}
 			}
 

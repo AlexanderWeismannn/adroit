@@ -165,7 +165,7 @@ func TestTerminalFallbackStates(t *testing.T) {
 
 		tp.mu.Lock()
 		require.True(t, tp.fallback, "should be in fallback mode for nil instance")
-		require.Contains(t, tp.fallbackText, "Select an instance", "fallback text should prompt to select instance")
+		require.Contains(t, tp.fallbackText, "Select a session", "fallback text should prompt to select a session")
 		require.Empty(t, tp.content, "content should be empty in fallback mode")
 		tp.mu.Unlock()
 	})

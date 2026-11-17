@@ -133,7 +133,7 @@ func (m *home) killedSessionFor(entry overlay.RestoreEntry) (config.KilledSessio
 func (m *home) restoreSession(record config.KilledSession) (tea.Model, tea.Cmd) {
 	if m.list.NumInstances() >= GlobalInstanceLimit {
 		return m, m.handleError(
-			fmt.Errorf("you can't create more than %d instances", GlobalInstanceLimit))
+			fmt.Errorf("you can't create more than %d sessions", GlobalInstanceLimit))
 	}
 
 	program := record.Program
