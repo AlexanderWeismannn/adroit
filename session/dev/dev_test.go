@@ -478,3 +478,39 @@ func TestStackStartIgnoresTheSelectionItWasNotGiven(t *testing.T) {
 	require.True(t, s.Configured(), "a running stack is configured whatever the cursor is on")
 	require.Equal(t, "session", s.RunningFor())
 }
+
+// A check's start command is a background command run while the interface owns
+// the terminal. The one in real use is `sudo service redis-server start`, and
+// sudo asks for its password on /dev/tty whatever stdin is: run as a plain child
+// it drew the prompt over the interface and split the keystrokes, and the stack
+// sat in "starting" for as long as the prompt waited. It must run in a session
+// of its own (no terminal to open) and give up after a while.
+func TestAStartCommandCannotReachTheTerminalOrHangTheStart(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	addr := ln.Addr().String()
+	_ = ln.Close()
+	check := func(command string) *config.DevConfig {
+		return &config.DevConfig{Command: "true", Checks: []config.DevCheck{
+			{Name: "redis", Type: "tcp", Target: addr, StartCommand: command}}}
+	}
+
+	t.Run("its own session", func(t *testing.T) {
+		cfg := check(`if [ "$(ps -o sid= -p $$ | tr -d ' ')" = "$$" ]; then echo detached; else echo shares-the-terminal; fi; exit 1`)
+		err := New(cfg).ensureServices(cfg, t.TempDir())
+		require.Error(t, err)
+		// In brackets: the error quotes the command too, and both words are in it.
+		require.Contains(t, err.Error(), "(detached)")
+		require.Contains(t, err.Error(), "sudo -n", "the error should say how to fix a password prompt")
+	})
+
+	t.Run("bounded", func(t *testing.T) {
+		defer func(d time.Duration) { startCommandTimeout = d }(startCommandTimeout)
+		startCommandTimeout = 300 * time.Millisecond
+		cfg := check("sleep 20")
+		began := time.Now()
+		err := New(cfg).ensureServices(cfg, t.TempDir())
+		require.Error(t, err)
+		require.Less(t, time.Since(began), 5*time.Second, "a start command that never finishes held the start")
+	})
+}

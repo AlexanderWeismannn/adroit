@@ -91,7 +91,7 @@ func (m *home) stopDevStack() tea.Cmd {
 // interval the user most wants to watch.
 func (m *home) startDevStack() tea.Cmd {
 	selected := m.list.GetSelectedInstance()
-	if selected == nil || selected.Status == session.Loading {
+	if selected == nil || selected.GetStatus() == session.Loading {
 		return nil
 	}
 	// Asked of the selected session's repository rather than of the config as a
@@ -104,7 +104,7 @@ func (m *home) startDevStack() tea.Cmd {
 			"no dev stack is configured for %s: add an entry under \"dev_by_repo\" in the Adroit config",
 			filepath.Base(filepath.Clean(repoPath))))
 	}
-	if selected.Status == session.Paused {
+	if selected.GetStatus() == session.Paused {
 		return m.handleError(fmt.Errorf("session %s is paused: resume it before running its stack", selected.Title))
 	}
 
@@ -146,11 +146,60 @@ func (m *home) syncNaming(on bool) {
 		return
 	}
 	title := ""
-	if n := m.list.NumInstances(); n > 0 {
-		title = m.list.GetInstances()[n-1].Title
+	if m.pending != nil {
+		title = m.pending.Title
 	}
 	m.list.SetNaming(true, git.PreviewBranchName(
 		m.appConfig.BranchPrefixFor(m.namingRepo), m.appConfig.PreserveBranchCaseFor(m.namingRepo), title))
+}
+
+// removeInstance takes target out of the list, wherever it is, and leaves the
+// cursor on the row it was on -- or on the neighbour, when target was that row.
+// It reports whether target was in the list at all.
+//
+// Everything that drops a particular session goes through here rather than
+// through the row under the cursor. The cursor is not a reliable name for a
+// session: work finishing off the loop selects things, and an esc that meant
+// "abandon the session I am naming" used to kill whichever session that left
+// selected.
+func (m *home) removeInstance(target *session.Instance) bool {
+	if target == nil {
+		return false
+	}
+	prev := m.list.GetSelectedInstance()
+	m.list.SelectInstance(target)
+	if m.list.GetSelectedInstance() != target {
+		return false
+	}
+	m.list.Remove()
+	if prev != nil && prev != target {
+		m.list.SelectInstance(prev)
+	}
+	return true
+}
+
+// startInstance returns the Cmd that starts instance off the loop, and records
+// it as starting until its instanceStartedMsg comes back.
+func (m *home) startInstance(instance *session.Instance, selectedBranch string) tea.Cmd {
+	if m.starting == nil {
+		m.starting = map[*session.Instance]bool{}
+	}
+	m.starting[instance] = true
+	return func() tea.Msg {
+		err := instance.Start(true)
+		return instanceStartedMsg{instance: instance, err: err, selectedBranch: selectedBranch}
+	}
+}
+
+// discardPending abandons the new session being named or prompted for. It has
+// not been started, so there is nothing of it outside the list to tear down.
+func (m *home) discardPending() {
+	pending := m.pending
+	m.pending = nil
+	if pending == nil || pending.Started() {
+		return
+	}
+	m.removeInstance(pending)
 }
 
 func (m *home) instanceChanged() tea.Cmd {
@@ -183,7 +232,7 @@ func (m *home) spinnerNeeded() bool {
 		return true
 	}
 	for _, inst := range m.list.GetInstances() {
-		if inst.Status == session.Loading {
+		if inst.GetStatus() == session.Loading {
 			return true
 		}
 		switch inst.GetActivity() {
@@ -317,7 +366,7 @@ func killDetail(inst *session.Instance) string {
 // outright. Both are stated in the prompt, counted, before anything happens.
 func (m *home) updateFromRemote() tea.Cmd {
 	selected := m.list.GetSelectedInstance()
-	if selected == nil || selected.Status == session.Loading {
+	if selected == nil || selected.GetStatus() == session.Loading {
 		return nil
 	}
 	if !m.appConfig.UpstreamStatusEnabled() {
@@ -368,9 +417,9 @@ func runUpdateCmd(msg runUpdateMsg) tea.Cmd {
 		}
 		repoPath, worktreePath := worktree.GetRepoPath(), worktree.GetWorktreePath()
 		if msg.reset {
-			_, err = upstream.Reset(repoPath, worktreePath, msg.instance.Branch)
+			_, err = upstream.Reset(repoPath, worktreePath, msg.instance.GetBranch())
 		} else {
-			_, err = upstream.Pull(repoPath, worktreePath, msg.instance.Branch)
+			_, err = upstream.Pull(repoPath, worktreePath, msg.instance.GetBranch())
 		}
 		if err != nil {
 			return updateDoneMsg{err: fmt.Errorf("could not update %q: %w", msg.instance.Title, err)}
@@ -395,18 +444,12 @@ func runUpdateCmd(msg runUpdateMsg) tea.Cmd {
 // session disappears immediately, and its remains are cleared up behind it.
 func (m *home) killApproved(instance *session.Instance) tea.Cmd {
 	// Removed before anything else, so the list is right even if a later step
-	// fails. Remove hands back the instance it dropped rather than leaving us to
-	// look it up again from a selection that has already moved on.
-	removed := m.list.Remove()
-	if removed == nil {
+	// fails. By identity, not by the cursor: the checks ran off the loop, and the
+	// cursor is free to move -- or be moved by a start finishing -- meanwhile.
+	if !m.removeInstance(instance) {
 		return nil
 	}
-	if removed.Title != instance.Title {
-		// The selection cannot move while the confirmation is up, so this should be
-		// unreachable; tear down what was actually removed if it ever is not.
-		log.WarningLog.Printf("kill confirmed for %q but %q was selected; removing %q",
-			instance.Title, removed.Title, removed.Title)
-	}
+	removed := instance
 	title := removed.Title
 
 	// Before anything is torn down: what makes this session restorable is its
@@ -433,6 +476,7 @@ func (m *home) killApproved(instance *session.Instance) tea.Cmd {
 		m.syncDevBadge()
 	}
 
+	m.killing++
 	return tea.Batch(
 		m.instanceChanged(),
 		func() tea.Msg {
@@ -472,7 +516,7 @@ func ciStatusFor(instance *session.Instance) ci.Status {
 	}
 	// The recorded branch is only the fallback: ci resolves the worktree's actual
 	// HEAD, so a session whose branch was renamed or switched still finds its PR.
-	return ci.Get(worktree.GetRepoPath(), worktree.GetWorktreePath(), instance.Branch)
+	return ci.Get(worktree.GetRepoPath(), worktree.GetWorktreePath(), instance.GetBranch())
 }
 
 // upstreamStatusFor returns the cached standing of an instance's branch against
@@ -491,5 +535,5 @@ func upstreamStatusFor(instance *session.Instance) upstream.Status {
 	if err != nil {
 		return upstream.Status{}
 	}
-	return upstream.Get(worktree.GetRepoPath(), worktree.GetWorktreePath(), instance.Branch)
+	return upstream.Get(worktree.GetRepoPath(), worktree.GetWorktreePath(), instance.GetBranch())
 }

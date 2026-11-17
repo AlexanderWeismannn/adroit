@@ -86,7 +86,7 @@ func (m *home) handleKeyPress(msg tea.KeyPressMsg) (mod tea.Model, cmd tea.Cmd) 
 		if msg.String() == "ctrl+c" {
 			m.naming = false
 			m.promptAfterName = false
-			m.list.Kill()
+			m.discardPending()
 			return m, tea.Sequence(
 				tea.RequestWindowSize,
 				func() tea.Msg {
@@ -96,7 +96,12 @@ func (m *home) handleKeyPress(msg tea.KeyPressMsg) (mod tea.Model, cmd tea.Cmd) 
 			)
 		}
 
-		instance := m.list.GetInstances()[m.list.NumInstances()-1]
+		instance := m.pending
+		if instance == nil {
+			// Nothing to name: whatever opened the row has already let it go.
+			m.naming = false
+			return m, nil
+		}
 		switch msg.Code {
 		// Start the instance (enable previews etc) and go back to the main menu state.
 		case tea.KeyEnter:
@@ -113,7 +118,7 @@ func (m *home) handleKeyPress(msg tea.KeyPressMsg) (mod tea.Model, cmd tea.Cmd) 
 				m.naming = false
 				m.menu.SetState(ui.StatePrompt)
 				input := m.newPromptOverlay()
-				m.overlay = &promptScreen{input: input}
+				m.overlay = &promptScreen{input: input, target: instance}
 				// Trigger initial branch search (no debounce, version 0)
 				initialSearch := m.runBranchSearch("", input.BranchFilterVersion())
 				return m, tea.Batch(tea.RequestWindowSize, initialSearch)
@@ -122,33 +127,15 @@ func (m *home) handleKeyPress(msg tea.KeyPressMsg) (mod tea.Model, cmd tea.Cmd) 
 			// Set Loading status and finalize into the list immediately
 			instance.SetStatus(session.Loading)
 			m.newInstanceFinalizer()
+			m.pending = nil
 			m.promptAfterName = false
 			m.naming = false
 			m.menu.SetState(ui.StateDefault)
 
 			// Return a tea.Cmd that runs instance.Start in the background
-			startCmd := func() tea.Msg {
-				err := instance.Start(true)
-				return instanceStartedMsg{
-					instance:        instance,
-					err:             err,
-					promptAfterName: false,
-				}
-			}
-
-			return m, tea.Batch(tea.RequestWindowSize, m.instanceChanged(), startCmd)
+			return m, tea.Batch(tea.RequestWindowSize, m.instanceChanged(), m.startInstance(instance, ""))
 		case tea.KeySpace:
 			if err := instance.SetTitle(instance.Title + " "); err != nil {
-				return m, m.handleError(err)
-			}
-		default:
-			if !overlay.IsTyped(msg) {
-				return m, nil
-			}
-			if ansi.StringWidth(instance.Title) >= 32 {
-				return m, m.handleError(fmt.Errorf("title cannot be longer than 32 characters"))
-			}
-			if err := instance.SetTitle(instance.Title + msg.Text); err != nil {
 				return m, m.handleError(err)
 			}
 		case tea.KeyBackspace:
@@ -179,7 +166,7 @@ func (m *home) handleKeyPress(msg tea.KeyPressMsg) (mod tea.Model, cmd tea.Cmd) 
 			m.naming = false
 			m.menu.SetState(ui.StatePrompt)
 			input := m.newBranchOverlay()
-			m.overlay = &promptScreen{input: input}
+			m.overlay = &promptScreen{input: input, target: instance}
 			version := input.BranchFilterVersion()
 			initialSearch := m.runBranchSearch("", version)
 			// Fetch as N does, then search again: this path listed only the
@@ -194,7 +181,7 @@ func (m *home) handleKeyPress(msg tea.KeyPressMsg) (mod tea.Model, cmd tea.Cmd) 
 			}, m.runBranchSearch("", version))
 			return m, tea.Batch(tea.RequestWindowSize, initialSearch, refreshed)
 		case tea.KeyEscape:
-			m.list.Kill()
+			m.discardPending()
 			m.naming = false
 			m.instanceChanged()
 
@@ -205,6 +192,16 @@ func (m *home) handleKeyPress(msg tea.KeyPressMsg) (mod tea.Model, cmd tea.Cmd) 
 					return nil
 				},
 			)
+		default:
+			if !overlay.IsTyped(msg) {
+				return m, nil
+			}
+			if ansi.StringWidth(instance.Title) >= 32 {
+				return m, m.handleError(fmt.Errorf("title cannot be longer than 32 characters"))
+			}
+			if err := instance.SetTitle(instance.Title + msg.Text); err != nil {
+				return m, m.handleError(err)
+			}
 		}
 		return m, nil
 	}
@@ -238,6 +235,7 @@ func (m *home) handleKeyPress(msg tea.KeyPressMsg) (mod tea.Model, cmd tea.Cmd) 
 	if msg.String() == "ctrl+c" || msg.String() == "q" {
 		return m.handleQuit()
 	}
+	m.quitArmed = false
 
 	// 1-9 select the row wearing that number. Not in the key map: nine bindings
 	// for one action would crowd the menu, and the numbers are already on screen.
@@ -262,12 +260,15 @@ func (m *home) handleKeyPress(msg tea.KeyPressMsg) (mod tea.Model, cmd tea.Cmd) 
 		return m, m.instanceChanged()
 	case keys.KeySendPrompt:
 		selected := m.list.GetSelectedInstance()
-		if selected == nil || !selected.Started() || selected.Status == session.Paused ||
-			selected.Status == session.Loading {
+		if selected == nil || !selected.Started() || selected.GetStatus() == session.Paused ||
+			selected.GetStatus() == session.Loading {
 			return m, nil
 		}
 		m.menu.SetState(ui.StatePrompt)
-		m.overlay = &promptScreen{input: overlay.NewTextInputOverlay(fmt.Sprintf("Send to %s", selected.Title), "")}
+		m.overlay = &promptScreen{
+			input:  overlay.NewTextInputOverlay(fmt.Sprintf("Send to %s", selected.Title), ""),
+			target: selected,
+		}
 		return m, tea.RequestWindowSize
 	case keys.KeyHelp:
 		return m.showHelpScreen(helpTypeGeneral{}, nil)
@@ -294,6 +295,7 @@ func (m *home) handleKeyPress(msg tea.KeyPressMsg) (mod tea.Model, cmd tea.Cmd) 
 		}
 
 		m.newInstanceFinalizer = m.list.AddInstance(instance)
+		m.pending = instance
 		m.list.SetSelectedInstance(m.list.NumInstances() - 1)
 		m.naming = true
 		m.menu.SetState(ui.StateNewInstance)
@@ -315,6 +317,7 @@ func (m *home) handleKeyPress(msg tea.KeyPressMsg) (mod tea.Model, cmd tea.Cmd) 
 		}
 
 		m.newInstanceFinalizer = m.list.AddInstance(instance)
+		m.pending = instance
 		m.list.SetSelectedInstance(m.list.NumInstances() - 1)
 		m.naming = true
 		m.menu.SetState(ui.StateNewInstance)
@@ -368,7 +371,7 @@ func (m *home) handleKeyPress(msg tea.KeyPressMsg) (mod tea.Model, cmd tea.Cmd) 
 		return m, m.instanceChanged()
 	case keys.KeyKill:
 		selected := m.list.GetSelectedInstance()
-		if selected == nil || selected.Status == session.Loading {
+		if selected == nil || selected.GetStatus() == session.Loading {
 			return m, nil
 		}
 		if m.busy[selected] {
@@ -413,7 +416,7 @@ func (m *home) handleKeyPress(msg tea.KeyPressMsg) (mod tea.Model, cmd tea.Cmd) 
 		return m, m.confirmAction("Kill session", message, "kill", killAction)
 	case keys.KeySubmit:
 		selected := m.list.GetSelectedInstance()
-		if selected == nil || selected.Status == session.Loading {
+		if selected == nil || selected.GetStatus() == session.Loading {
 			return m, nil
 		}
 		// Nothing of this session's own to push: its changes are the user's own
@@ -441,7 +444,7 @@ func (m *home) handleKeyPress(msg tea.KeyPressMsg) (mod tea.Model, cmd tea.Cmd) 
 		return m, m.confirmAction("Push", message, "push", pushAction)
 	case keys.KeyCheckout:
 		selected := m.list.GetSelectedInstance()
-		if selected == nil || selected.Status == session.Loading {
+		if selected == nil || selected.GetStatus() == session.Loading {
 			return m, nil
 		}
 		// Checkout commits the worktree and removes it. There is no worktree here,
@@ -478,7 +481,7 @@ func (m *home) handleKeyPress(msg tea.KeyPressMsg) (mod tea.Model, cmd tea.Cmd) 
 		return m, nil
 	case keys.KeyOpenPR:
 		selected := m.list.GetSelectedInstance()
-		if selected == nil || selected.Status == session.Loading {
+		if selected == nil || selected.GetStatus() == session.Loading {
 			return m, nil
 		}
 		// The key is drawn dim when no pull request is known, and a press on it
@@ -522,7 +525,7 @@ func (m *home) handleKeyPress(msg tea.KeyPressMsg) (mod tea.Model, cmd tea.Cmd) 
 		return m, nil
 	case keys.KeyResume:
 		selected := m.list.GetSelectedInstance()
-		if selected == nil || selected.Status == session.Loading {
+		if selected == nil || selected.GetStatus() == session.Loading {
 			return m, nil
 		}
 		// A resume recreates the worktree (git, which waits on any lock another
@@ -550,7 +553,7 @@ func (m *home) handleKeyPress(msg tea.KeyPressMsg) (mod tea.Model, cmd tea.Cmd) 
 		if selected != nil && selected.Paused() {
 			return m, m.handleNotice(fmt.Sprintf("%q is paused: press r to resume it first", selected.Title))
 		}
-		if selected == nil || selected.Status == session.Loading || !selected.TmuxAlive() {
+		if selected == nil || selected.GetStatus() == session.Loading || !selected.TmuxAlive() {
 			return m, nil
 		}
 		// Terminal tab: attach to terminal session

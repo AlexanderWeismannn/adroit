@@ -269,6 +269,12 @@ func (t *TmuxSession) Start(workDir string) error {
 	for !t.DoesSessionExist() {
 		select {
 		case <-timeout:
+			// The client this started is ours alone -- t.Close knows nothing of it
+			// -- so it is released here, as on the way out below: the master
+			// closed and the process reaped, or every timeout left a descriptor
+			// open and a client running into a zombie.
+			_ = ptmx.Close()
+			go reapPty(cmd, t.sanitizedName)
 			if cleanupErr := t.Close(); cleanupErr != nil {
 				err = fmt.Errorf("%v (cleanup error: %v)", err, cleanupErr)
 			}

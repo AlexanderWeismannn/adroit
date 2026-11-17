@@ -38,7 +38,7 @@ func (m *home) recordKilledSession(instance *session.Instance) {
 
 	record := config.KilledSession{
 		Title:    instance.Title,
-		Branch:   instance.Branch,
+		Branch:   instance.GetBranch(),
 		Program:  instance.Program,
 		RepoPath: instance.Path,
 		KilledAt: time.Now(),
@@ -55,7 +55,14 @@ func (m *home) recordKilledSession(instance *session.Instance) {
 		record.RepoPath = worktree.GetRepoPath()
 	}
 
-	if transcript, ok := resume.Find(workdir); ok {
+	// The session's own conversation when it recorded one. The newest
+	// transcript in the directory is only the fallback: sessions running in the
+	// repository itself all share it, and the newest there may be another's.
+	transcript, ok := resume.ByID(workdir, instance.GetSessionID())
+	if !ok && instance.GetSessionID() == "" {
+		transcript, ok = resume.Find(workdir)
+	}
+	if ok {
 		record.SessionID = transcript.SessionID
 		record.TranscriptPath = transcript.Path
 		record.Summary = transcript.Summary
@@ -177,11 +184,7 @@ func (m *home) restoreSession(record config.KilledSession) (tea.Model, tea.Cmd) 
 	finalize()
 	m.menu.SetState(ui.StateDefault)
 
-	startCmd := func() tea.Msg {
-		err := instance.Start(true)
-		return instanceStartedMsg{instance: instance, err: err}
-	}
-	return m, tea.Batch(tea.RequestWindowSize, m.instanceChanged(), startCmd)
+	return m, tea.Batch(tea.RequestWindowSize, m.instanceChanged(), m.startInstance(instance, ""))
 }
 
 // uniqueTitle keeps a restored session from colliding with one already in the

@@ -802,3 +802,24 @@ func TestIsHuskNeedsAnIdleShellWithNothingUnderIt(t *testing.T) {
 		require.False(t, session.IsHusk())
 	})
 }
+
+// A session that never appears is given up on after two seconds. The client
+// that new-session ran under was left with its PTY open and nobody to wait for
+// it, so each such timeout leaked a descriptor and a process.
+func TestAStartThatTimesOutDoesNotLeaveItsClientBehind(t *testing.T) {
+	factory := &realProcessPtyFactory{t: t}
+	cmdExec := cmd_test.MockCmdExec{RunFunc: func(cmd *exec.Cmd) error {
+		if strings.Contains(cmd.String(), "has-session") {
+			return fmt.Errorf("can't find session")
+		}
+		return nil
+	}}
+
+	session := NewTmuxSessionWithDeps("never-appears", "program", factory, cmdExec)
+	require.Error(t, session.Start(t.TempDir()))
+	require.Len(t, factory.pids, 1)
+
+	require.Eventually(t, func() bool {
+		return processState(t, factory.pids[0]) == ""
+	}, 5*time.Second, 25*time.Millisecond, "the timed-out start left its client running")
+}

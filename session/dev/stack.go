@@ -1,6 +1,8 @@
 package dev
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -10,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/AlexanderWeismannn/adroit/cmd"
 	"github.com/AlexanderWeismannn/adroit/config"
 	"github.com/AlexanderWeismannn/adroit/log"
 	"github.com/AlexanderWeismannn/adroit/session/tmux"
@@ -476,21 +479,44 @@ func (s *Stack) ensureServices(cfg *config.DevConfig, worktree string) error {
 		s.phase = "starting " + c.Name
 		s.mu.Unlock()
 
-		out, err := exec.Command("sh", "-c", c.StartCommand).CombinedOutput()
-		if err != nil {
-			// Almost always a sudo prompt with nowhere to go. Hand the command
-			// back rather than hanging on a password nobody can type.
-			detail := strings.TrimSpace(string(out))
-			if detail == "" {
-				detail = err.Error()
-			}
-			return fmt.Errorf("could not start %s (%s) — run it yourself: %s",
-				c.Name, firstLine(detail), c.StartCommand)
+		if err := runStartCommand(c.StartCommand); err != nil {
+			return fmt.Errorf("could not start %s (%v) — if it needs a password, use sudo -n or a NOPASSWD rule, or run it yourself: %s",
+				c.Name, err, c.StartCommand)
 		}
 
 		if !waitFor(func() bool { return probe(c, worktree).State == LampUp }, 10*time.Second) {
 			return fmt.Errorf("%s did not come up after: %s", c.Name, c.StartCommand)
 		}
+	}
+	return nil
+}
+
+// startCommandTimeout bounds a check's start command. Starting a system service
+// takes seconds; anything still running after this is waiting on something that
+// is not coming, and the stack's start -- the lamp, the phase line -- waits on it.
+var startCommandTimeout = 2 * time.Minute
+
+// runStartCommand runs a check's start command where it cannot reach the
+// terminal, and reports the first line of what it said when it fails.
+//
+// The usual one is `sudo service redis-server start`. sudo asks for its password
+// on /dev/tty, not on stdin, so run as a plain child it drew the prompt over the
+// interface and split the keystrokes between the two, while the stack sat in
+// "starting" until the prompt gave up. Detached from the terminal (and with
+// stdin left as the null device) it fails at once instead, and says so.
+func runStartCommand(command string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), startCommandTimeout)
+	defer cancel()
+	out, err := cmd.Detach(exec.CommandContext(ctx, "sh", "-c", command)).CombinedOutput()
+	if ctx.Err() == context.DeadlineExceeded {
+		return fmt.Errorf("still running after %s", startCommandTimeout)
+	}
+	if err != nil {
+		detail := strings.TrimSpace(string(out))
+		if detail == "" {
+			detail = err.Error()
+		}
+		return errors.New(firstLine(detail))
 	}
 	return nil
 }

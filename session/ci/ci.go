@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	adroitcmd "github.com/AlexanderWeismannn/adroit/cmd"
 	"github.com/AlexanderWeismannn/adroit/log"
 	"github.com/AlexanderWeismannn/adroit/session/git"
 )
@@ -365,6 +366,10 @@ func fetch(repoPath, branch string, headTime time.Time) (Status, error) {
 	// Run inside the repo so gh resolves the remote itself; this also means a
 	// fork or a non-github remote simply yields an error we swallow.
 	cmd.Dir = repoPath
+	// The timeout bounds the wait for gh's output too, not only gh: anything it
+	// started that still holds the pipe would otherwise keep Output waiting,
+	// and the cache entry marked as being fetched with it.
+	cmd.WaitDelay = adroitcmd.WaitDelay
 
 	out, err := cmd.Output()
 	if err != nil {

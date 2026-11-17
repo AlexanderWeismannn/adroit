@@ -624,3 +624,63 @@ func TestAResumedSessionStillOwnsItsBranch(t *testing.T) {
 		t.Fatalf("branch %s survived the kill of the session that created it (%s)", branch, out)
 	}
 }
+
+// adroit reset matched the worktrees of the repository it was run from to the
+// folders in the worktree directory with strings.Contains and ran branch -D on
+// each match before removing the worktree -- which git refuses for a branch
+// still checked out, so the branches Adroit made all survived, and the
+// worktrees of every other repository went as bare folders with their
+// registrations left behind. Each stored session is now torn down against its
+// own repository, and only a branch Adroit created is deleted.
+func TestResetRemovesOnlyWhatAdroitMade(t *testing.T) {
+	newRepo := func(name string) string {
+		repo := filepath.Join(t.TempDir(), name)
+		mustRunGit(t, "", "init", "-b", "main", repo)
+		mustRunGit(t, repo, "config", "user.name", "Test User")
+		mustRunGit(t, repo, "config", "user.email", "test@example.com")
+		mustRunGit(t, repo, "commit", "--allow-empty", "-m", "initial")
+		return repo
+	}
+	dir := t.TempDir()
+	repo, other := newRepo("repo"), newRepo("other")
+
+	mustRunGit(t, repo, "branch", "mine")
+	mustRunGit(t, repo, "worktree", "add", filepath.Join(dir, "mine"), "mine")
+	mustRunGit(t, repo, "worktree", "add", "-b", "adroit/fix", filepath.Join(dir, "fix"))
+	mustRunGit(t, other, "worktree", "add", "-b", "adroit/other", filepath.Join(dir, "other"))
+	// Adopted from where it already was: outside the directory, and not ours.
+	adopted := filepath.Join(t.TempDir(), "adopted")
+	mustRunGit(t, repo, "worktree", "add", "-b", "kept", adopted)
+
+	err := cleanupWorktrees(dir, []ManagedWorktree{
+		{RepoPath: repo, WorktreePath: filepath.Join(dir, "mine"), BranchName: "mine", IsExistingBranch: true},
+		{RepoPath: repo, WorktreePath: filepath.Join(dir, "fix"), BranchName: "adroit/fix"},
+		{RepoPath: repo, WorktreePath: adopted, BranchName: "kept", IsExistingBranch: true},
+		// "other" has no stored session: a leftover folder.
+	})
+	if err != nil {
+		t.Fatalf("cleanup: %v", err)
+	}
+
+	branches := mustRunGit(t, repo, "branch", "--format=%(refname:short)")
+	if !strings.Contains(branches, "mine") {
+		t.Errorf("the branch the user already had was deleted; branches left:\n%s", branches)
+	}
+	if strings.Contains(branches, "adroit/fix") {
+		t.Errorf("the branch Adroit created survived:\n%s", branches)
+	}
+	if _, err := os.Stat(adopted); err != nil {
+		t.Errorf("the adopted worktree outside Adroit's directory was removed: %v", err)
+	}
+	for _, name := range []string{"mine", "fix", "other"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); !os.IsNotExist(err) {
+			t.Errorf("%s is still in the worktree directory", name)
+		}
+	}
+	if list := mustRunGit(t, other, "worktree", "list"); strings.Contains(list, filepath.Join(dir, "other")) {
+		t.Errorf("the other repository still lists the removed worktree:\n%s", list)
+	}
+	if !strings.Contains(mustRunGit(t, other, "branch"), "adroit/other") {
+		t.Error("a leftover folder's branch was deleted; nothing says Adroit made it")
+	}
+}
