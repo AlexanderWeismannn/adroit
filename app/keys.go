@@ -138,16 +138,6 @@ func (m *home) handleKeyPress(msg tea.KeyPressMsg) (mod tea.Model, cmd tea.Cmd) 
 			if err := instance.SetTitle(instance.Title + " "); err != nil {
 				return m, m.handleError(err)
 			}
-		default:
-			if !overlay.IsTyped(msg) {
-				return m, nil
-			}
-			if ansi.StringWidth(instance.Title) >= 32 {
-				return m, m.handleError(fmt.Errorf("title cannot be longer than 32 characters"))
-			}
-			if err := instance.SetTitle(instance.Title + msg.Text); err != nil {
-				return m, m.handleError(err)
-			}
 		case tea.KeyBackspace:
 			runes := []rune(instance.Title)
 			if len(runes) == 0 {
@@ -202,6 +192,16 @@ func (m *home) handleKeyPress(msg tea.KeyPressMsg) (mod tea.Model, cmd tea.Cmd) 
 					return nil
 				},
 			)
+		default:
+			if !overlay.IsTyped(msg) {
+				return m, nil
+			}
+			if ansi.StringWidth(instance.Title) >= 32 {
+				return m, m.handleError(fmt.Errorf("title cannot be longer than 32 characters"))
+			}
+			if err := instance.SetTitle(instance.Title + msg.Text); err != nil {
+				return m, m.handleError(err)
+			}
 		}
 		return m, nil
 	}
