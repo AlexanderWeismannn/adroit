@@ -78,7 +78,7 @@ func (m *home) openRestorePicker() (tea.Model, tea.Cmd) {
 	}
 	records := m.appState.GetKilledSessions()
 	if len(records) == 0 {
-		return m, m.handleError(fmt.Errorf("no killed sessions to restore"))
+		return m, m.handleNotice("no killed sessions to restore")
 	}
 
 	entries := make([]overlay.RestoreEntry, 0, len(records))

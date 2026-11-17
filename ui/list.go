@@ -236,6 +236,9 @@ type List struct {
 	autoyes       bool
 	// focused is whether the list owns the keyboard, which its border shows.
 	focused bool
+	// restorable is whether a killed session can be restored, which the empty
+	// list offers only when it can.
+	restorable bool
 	// compact draws one line per session, for the mode where the list has the
 	// whole width and the window is behind it.
 	compact bool
@@ -1329,13 +1332,18 @@ func (r *InstanceRenderer) repoName(i *session.Instance) string {
 	return r.repoOf[i]
 }
 
+// SetRestorable records whether a killed session can be brought back, which is
+// whether the empty list offers R.
+func (l *List) SetRestorable(restorable bool) { l.restorable = restorable }
+
 // emptyListHint is the body of a list with no sessions in it, clipped to the
-// column like every row is.
-func emptyListHint(width int) string {
+// column like every row is. R is offered only when there is something to
+// restore: with nothing killed it could only answer that.
+func emptyListHint(width int, restorable bool) string {
 	row := func(k, d string) string {
 		return clip(" "+hintKeyStyle.Width(hintKeyColumn).Render(k)+hintDescStyle.Render(d), width)
 	}
-	return strings.Join([]string{
+	rows := []string{
 		"",
 		clip(" "+titleStyle.Bold(true).Render("No sessions yet"), width),
 		clip(" "+hintDescStyle.Render("An agent in its own worktree,"), width),
@@ -1343,9 +1351,11 @@ func emptyListHint(width int) string {
 		"",
 		row("n", "new session"),
 		row("N", "new session with a prompt"),
-		row("R", "restore a killed session"),
-		row("?", "every key"),
-	}, "\n")
+	}
+	if restorable {
+		rows = append(rows, row("R", "restore a killed session"))
+	}
+	return strings.Join(append(rows, row("?", "every key")), "\n")
 }
 
 // scrollIndicator is the marker that stands in for the sessions a pane too
@@ -1474,7 +1484,7 @@ func (l *List) rows(width, height int) string {
 	// beside it names n, and the three keys that matter here are worth the
 	// rows that would otherwise be blank.
 	if len(l.items) == 0 {
-		return emptyListHint(width)
+		return emptyListHint(width, l.restorable)
 	}
 
 	var b strings.Builder

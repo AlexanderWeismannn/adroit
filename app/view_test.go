@@ -57,3 +57,14 @@ func TestSettingsFitAShortTerminal(t *testing.T) {
 		require.NotContains(t, row, "│", "the settings box runs into the bar: %q", row)
 	}
 }
+
+// Information is not an error: "no killed sessions to restore" was drawn in red
+// behind a ✗, as if something had gone wrong.
+func TestNothingToRestoreIsANoticeNotAnError(t *testing.T) {
+	h := newSizedHome(t, 100, 30)
+	h.appState = &fakeAppState{}
+	h.openRestorePicker()
+	row := strings.Split(ansi.Strip(h.view()), "\n")[h.layout.Notice.Y]
+	require.Contains(t, row, "no killed sessions to restore")
+	require.NotContains(t, row, "✗", "an informational message is drawn as an error")
+}

@@ -151,6 +151,9 @@ func (m *Menu) SetRestorable(restorable bool) {
 	m.updateOptions()
 }
 
+// Restorable reports whether there is a killed session to restore.
+func (m *Menu) Restorable() bool { return m.restorable }
+
 // SetDevRunning records whether a dev stack is currently up.
 func (m *Menu) SetDevRunning(running bool) {
 	if m.devRunning == running {
