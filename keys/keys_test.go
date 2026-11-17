@@ -71,3 +71,25 @@ func TestOfferedLeadsWithWhatMattersMost(t *testing.T) {
 		t.Errorf("a paused session dims %v, want checkout and the pull request", dim)
 	}
 }
+
+// Every key the dispatcher answers to is on the help card. u (update) was
+// bound and offered on the bar but had no line on the card and no help text,
+// and ? was missing too.
+func TestEveryBoundKeyIsOnTheHelpCard(t *testing.T) {
+	covered := map[KeyName]bool{}
+	for _, section := range HelpSections {
+		for _, line := range section.Lines {
+			if line.Key == "" && line.Desc == "" {
+				covered[line.Name] = true
+			}
+			for _, k := range line.Covers {
+				covered[k] = true
+			}
+		}
+	}
+	for _, b := range Table {
+		if len(b.Keys) > 0 && !covered[b.Name] {
+			t.Errorf("%q (%v) is bound but not on the help card", b.Key, b.Name)
+		}
+	}
+}

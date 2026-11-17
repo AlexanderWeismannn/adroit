@@ -138,21 +138,21 @@ func (h helpTypeInstanceStart) toContent(width int) string {
 			lipgloss.NewStyle().Bold(true).Render(h.instance.Program))),
 		"",
 		headerStyle.Render("Managing:"),
-		keyStyle.Render("↵/o")+descStyle.Render("   - Attach to the session to interact with it directly"),
-		keyStyle.Render("tab")+descStyle.Render("   - Switch preview panes to view session diff"),
-		keyStyle.Render("D")+descStyle.Render("     - Kill (delete) the selected session"),
+		helpRow("↵/o", "Attach to the session to interact with it directly", width),
+		helpRow("←/h →/l", "Switch to the Diff, Terminal and Run tabs", width),
+		helpRow("D", "Kill (delete) the selected session", width),
 		"",
 		headerStyle.Render("Handoff:"),
-		keyStyle.Render("c")+descStyle.Render("     - Checkout this instance's branch"),
-		keyStyle.Render("p")+descStyle.Render("     - Push branch to GitHub to create a PR"),
-		keyStyle.Render("g")+descStyle.Render("     - Open that PR in your browser once it exists"),
+		helpRow("c", "Checkout: commit, pause the session and copy its branch name", width),
+		helpRow("p", "Push the branch to GitHub to create a PR", width),
+		helpRow("g", "Open that PR in your browser once it exists", width),
 	)
 	return ansi.Wrap(content, width, "")
 }
 
 func (h helpTypeInstanceAttach) toContent(width int) string {
 	content := lipgloss.JoinVertical(lipgloss.Left,
-		descStyle.Render("To detach from a session, press ")+keyStyle.Render("ctrl-q"),
+		descStyle.Render("To detach from a session, press ")+keyStyle.Render("ctrl+q"),
 	)
 	return ansi.Wrap(content, width, "")
 }
@@ -164,8 +164,8 @@ func (h helpTypeInstanceCheckout) toContent(width int) string {
 		"Feel free to make changes to the branch and commit them. When resuming, the session will continue from where you left off.",
 		"",
 		headerStyle.Render("Commands:"),
-		keyStyle.Render("c")+descStyle.Render(" - Checkout: commit changes locally and pause session"),
-		keyStyle.Render("r")+descStyle.Render(" - Resume a paused session"),
+		helpRow("c", "Checkout: commit changes locally and pause session", width),
+		helpRow("r", "Resume a paused session", width),
 	)
 	return ansi.Wrap(content, width, "")
 }
