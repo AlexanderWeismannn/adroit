@@ -18,11 +18,9 @@ var (
 )
 
 var (
-	tiTitleStyle         lipgloss.Style
 	tiButtonStyle        lipgloss.Style
 	tiFocusedButtonStyle lipgloss.Style
 	tiDividerStyle       lipgloss.Style
-	tiHintStyle          lipgloss.Style
 	tiErrorStyle         lipgloss.Style
 )
 
@@ -30,16 +28,11 @@ func init() { theme.OnChange(applyTextInputTheme) }
 
 func applyTextInputTheme() {
 	tiStyle = tiStyle.BorderForeground(theme.Color(theme.Accent))
-	tiTitleStyle = lipgloss.NewStyle().
-		Foreground(theme.Color(theme.Accent)).
-		Bold(true).
-		MarginBottom(1)
 	tiButtonStyle = lipgloss.NewStyle().Foreground(theme.Color(theme.Muted))
 	tiFocusedButtonStyle = lipgloss.NewStyle().
 		Background(theme.Color(theme.Accent)).
 		Foreground(theme.Color(theme.AccentText))
 	tiDividerStyle = lipgloss.NewStyle().Foreground(theme.Color(theme.Subtle))
-	tiHintStyle = lipgloss.NewStyle().Foreground(theme.Color(theme.Subtle))
 	tiErrorStyle = lipgloss.NewStyle().Foreground(theme.Color(theme.Danger))
 }
 

@@ -217,8 +217,6 @@ func truncateTo(s string, width int) string {
 }
 
 var (
-	restoreBorderStyle   lipgloss.Style
-	restoreTitleStyle    lipgloss.Style
 	restoreHintStyle     lipgloss.Style
 	restoreRowStyle      lipgloss.Style
 	restoreSelectedStyle lipgloss.Style
@@ -230,13 +228,6 @@ var (
 func init() { theme.OnChange(applyRestorePickerTheme) }
 
 func applyRestorePickerTheme() {
-	restoreBorderStyle = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(theme.Color(theme.Accent)).
-		Padding(1, 2)
-	restoreTitleStyle = lipgloss.NewStyle().
-		Foreground(theme.Color(theme.Accent)).
-		Bold(true)
 	// Text is never Subtle: that role is for rules, and is unreadable as words
 	// on several palettes (solarized's equals its selection band).
 	restoreHintStyle = lipgloss.NewStyle().Foreground(theme.Color(theme.Muted))

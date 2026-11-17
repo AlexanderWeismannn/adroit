@@ -156,14 +156,14 @@ var needsInputChipStyle, unseenStyle lipgloss.Style
 // The selected row's colours are their own pair of roles rather than a shade of
 // the accent: they have to contrast with each other, which no single hue can
 // guarantee across every theme.
-var selectedBg, selectedFg, selectionAccent color.Color
+var selectedBg, selectedFg color.Color
 
 // Left padding drops to 0 where the border is added, so the bar occupies the
 // column the padding used to and the row's total width is unchanged — the
 // unselected styles keep their padding and the two stay aligned.
 var selectedTitleStyle, selectedDescStyle lipgloss.Style
 
-var mainTitle, autoYesStyle, listRuleStyle, listUnfocusedRuleStyle, listLabelStyle lipgloss.Style
+var listRuleStyle, listUnfocusedRuleStyle, listLabelStyle lipgloss.Style
 
 // Styles hold a copy of their colour, so a theme change has to rebuild them
 // rather than be re-read. Registered here so a package added later cannot be
@@ -211,7 +211,6 @@ func applyListTheme() {
 
 	selectedBg = theme.Color(theme.SelectionBg)
 	selectedFg = theme.Color(theme.SelectionFg)
-	selectionAccent = theme.Color(theme.Accent)
 
 	selectedTitleStyle = lipgloss.NewStyle().
 		Bold(true).
@@ -224,12 +223,6 @@ func applyListTheme() {
 	listRuleStyle = lipgloss.NewStyle().Foreground(theme.Color(theme.Accent))
 	listUnfocusedRuleStyle = lipgloss.NewStyle().Foreground(theme.Color(theme.Muted))
 	listLabelStyle = lipgloss.NewStyle().Foreground(theme.Color(theme.Muted))
-	mainTitle = lipgloss.NewStyle().
-		Background(theme.Color(theme.Accent)).
-		Foreground(theme.Color(theme.AccentText))
-	autoYesStyle = lipgloss.NewStyle().
-		Background(theme.Color(theme.SelectionBg)).
-		Foreground(theme.Color(theme.SelectionFg))
 }
 
 type List struct {
@@ -777,18 +770,7 @@ func shortAge(d time.Duration) string {
 // Only on a row that has stopped. A spinning row is saying "now" already, and
 // the number would be a second stale by the time it was read.
 func (r *InstanceRenderer) rowAge(i *session.Instance, beingNamed bool, bg color.Color) (string, int) {
-	if beingNamed || i.Status == session.Loading || i.Status == session.Running {
-		return "", 0
-	}
-	switch i.GetActivity() {
-	case session.ActivityWorking, session.ActivityShell:
-		return "", 0
-	}
-	at := i.LastActiveAt()
-	if at.IsZero() {
-		return "", 0
-	}
-	age := shortAge(r.clock().Sub(at))
+	age := r.ageText(i, beingNamed)
 	if age == "" {
 		return "", 0
 	}
@@ -915,14 +897,6 @@ func (r *InstanceRenderer) busyMark(i *session.Instance, bg color.Color) (string
 	}
 	mark := doing + " "
 	return workingStyle.Background(bg).Render(mark), ansi.StringWidth(mark)
-}
-
-// diffSegment is the diff count with the space before it, painted, or nothing.
-func diffSegment(diff string, bg color.Color) string {
-	if diff == "" {
-		return ""
-	}
-	return lipgloss.NewStyle().Background(bg).Render(" ") + diff
 }
 
 // RenderCompact draws a session on one line, for the compact mode and the
