@@ -216,7 +216,11 @@ func (w *TabbedWindow) SetSize(width, height int) {
 	// takes, and a negative budget reached the panes: the preview sliced with it
 	// and panicked on the first frame. Nothing is left to draw, so draw nothing.
 	contentHeight := max(height-tabBarHeight-footerHeight-windowStyle.GetVerticalFrameSize(), 0)
-	contentWidth := max(w.width-windowStyle.GetHorizontalFrameSize(), 0)
+	// w.width is already the inside of the side borders, which is the width
+	// String places the content in. Taking the frame off it a second time left
+	// every pane two columns narrower than its box: the preview's lines and
+	// rules were cut with "…" beside two blank columns.
+	contentWidth := w.width
 
 	w.preview.SetSize(contentWidth, contentHeight)
 	w.diff.SetSize(contentWidth, contentHeight)

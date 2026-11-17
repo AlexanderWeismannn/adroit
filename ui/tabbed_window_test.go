@@ -262,3 +262,16 @@ func TestTabAtFollowsTheDrawnBar(t *testing.T) {
 	_, ok := w.TabAt(0)
 	require.False(t, ok, "the corner is no tab")
 }
+
+// The panes fill the box: the side borders are the only frame. The frame was
+// taken off twice, so every pane was two columns narrower than its box and the
+// preview cut its lines with "…" beside two blank columns.
+func TestThePanesFillTheWindowsBox(t *testing.T) {
+	w := newTestTabbedWindow()
+	w.SetSize(60, 20)
+	width, _ := w.GetPreviewSize()
+	require.Equal(t, 58, width, "a 60-column window has 58 columns inside its side borders")
+	for _, line := range strings.Split(w.String(), "\n") {
+		require.Equal(t, 60, lipgloss.Width(line))
+	}
+}
