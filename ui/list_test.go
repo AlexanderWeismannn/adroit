@@ -387,13 +387,36 @@ func TestBadgeLegendCoversEveryGlyph(t *testing.T) {
 
 	for _, icon := range []string{
 		strings.TrimSpace(readyIcon), strings.TrimSpace(pausedIcon), strings.TrimSpace(notStartedIcon),
-		strings.TrimSpace(unseenIcon), strings.TrimSpace(needsInputChip),
+		strings.TrimSpace(unseenIcon), strings.TrimSpace(needsInputChip), shellLegendFrame,
 		spinnerLegendFrame, strings.TrimSpace(doneChip),
 		ciSuccessIcon, ciFailureIcon, ciPendingIcon, ciMergedIcon, ciClosedIcon, ciNoPRIcon,
 		ciConflictIcon, ciChangesIcon, ciApprovedIcon,
 		upstreamBehindIcon, upstreamAheadIcon, ciCommentIcon,
 	} {
 		require.Contains(t, legend, icon, "glyph %q is drawn in the list but absent from the legend", icon)
+	}
+}
+
+// One glyph, one meaning. ✓ was a passing build and a finish you had not seen;
+// ✗ a failed build and a dev stack that is down -- on the same row, a line
+// apart. Every mark a row can carry must be its own shape.
+func TestEveryRowGlyphMeansOneThing(t *testing.T) {
+	marks := map[string]string{
+		"ready": readyIcon, "paused": pausedIcon, "not started": notStartedIcon, "just finished": doneChip,
+		"needs input": needsInputChip, "unseen": unseenIcon, "agent working": spinnerLegendFrame,
+		"shell running": shellLegendFrame, "CI passed": ciSuccessIcon, "CI failed": ciFailureIcon,
+		"CI running": ciPendingIcon, "merged": ciMergedIcon, "closed": ciClosedIcon, "no PR": ciNoPRIcon,
+		"conflict": ciConflictIcon, "changes": ciChangesIcon, "approved": ciApprovedIcon, "comments": ciCommentIcon,
+		"behind": upstreamBehindIcon, "ahead": upstreamAheadIcon, "stack up": lampUpGlyph,
+		"stack starting": lampPendingGlyph, "stack down": lampDownGlyph, "branch": branchIcon, "repo": repoIcon,
+	}
+	seen := map[string]string{}
+	for meaning, glyph := range marks {
+		glyph = strings.TrimSpace(glyph)
+		if other, dup := seen[glyph]; dup {
+			t.Errorf("%q means both %q and %q", glyph, other, meaning)
+		}
+		seen[glyph] = meaning
 	}
 }
 
@@ -826,7 +849,8 @@ func TestShellStillRunningDoesNotLookFinished(t *testing.T) {
 	out := r.Render(inst, 1, false, false, false)
 	require.NotContains(t, out, strings.TrimSpace(readyIcon),
 		"a session with a shell still running rendered the ready dot")
-	require.Contains(t, out, r.spinner.View(), "the row should still be animating")
+	require.Contains(t, out, r.shellFrame(), "the row should still be animating")
+	require.NotContains(t, out, r.spinner.View(), "the shell must not wear the agent's own spinner")
 }
 
 // The chip is what makes a finish visible to someone who was reading another

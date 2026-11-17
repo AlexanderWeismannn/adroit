@@ -51,8 +51,9 @@ const needsInputChip = "? "
 // unseenIcon is a finished turn you have not looked at yet, once the chip has
 // had its moment. Kept until the cursor lands on the row, so coming back to the
 // terminal after ten minutes still says which sessions finished while you were
-// away -- the ready dot alone says only that they are idle now.
-const unseenIcon = "✓ "
+// away -- the ready dot alone says only that they are idle now. A four-pointed
+// star, not the check it used to be: ✓ is a passing build on the line below.
+const unseenIcon = "✦ "
 
 // doneChipWindow is how long that mark lasts: long enough to catch on your way
 // back to the terminal, short enough that a list left alone settles back to dots
@@ -62,6 +63,15 @@ const doneChipWindow = 15 * time.Second
 // spinnerLegendFrame is one frame of the animation, for the legend, which has no
 // tick of its own to advance it.
 const spinnerLegendFrame = "⠹"
+
+// shellFrames animate a row whose agent has stopped while a shell it started is
+// still running. They turn on the same tick as the agent's spinner but are a
+// different shape: the two states used to be one spinner in two colours, which
+// a narrow palette -- or a colour-blind reader -- could not tell apart.
+var shellFrames = []string{"◐", "◓", "◑", "◒"}
+
+// shellLegendFrame is the shell's frame for the legend.
+const shellLegendFrame = "◐"
 
 // CI badge icons. The verdict is a glyph so it reads at a glance, and the colour
 // carries the same information again for anyone scanning the column rather than
@@ -88,9 +98,11 @@ const (
 // None may carry an emoji presentation. The obvious choice for a conflict, U+26A0
 // WARNING SIGN, does in many fonts: runewidth measures it as one cell while the
 // terminal draws two, silently desynchronising the width accounting the badge
-// depends on. A bare "!" cannot, and U+2605 is not the emoji star (U+2B50).
+// depends on. U+2260 cannot, and U+2605 is not the emoji star (U+2B50).
 const (
-	ciConflictIcon = "!"
+	// Not a bare "!", which after a PR number read as emphasis ("#5503 !"); the
+	// word "conflict" is kept longest when there is room for words at all.
+	ciConflictIcon = "≠"
 	ciChangesIcon  = "✎"
 	ciApprovedIcon = "★"
 	// ciCommentIcon marks review or conversation remarks. A quotation ornament:
@@ -846,8 +858,9 @@ func (r *InstanceRenderer) stateGlyph(i *session.Instance, beingNamed, selected 
 		// Animated even though the agent has stopped. Something it started is
 		// still running and it will pick the work back up by itself, so a still
 		// mark here is precisely the wrong answer -- that is the whole point of
-		// this state. Amber rather than the accent says which of the two it is.
-		return spin(shellStyle)
+		// this state. A turning half-disc in amber, not the agent's dots in the
+		// accent, says which of the two it is by shape as well as colour.
+		return paint(shellStyle, r.shellFrame()+" ")
 	}
 
 	// Activity is only read off interfaces we can parse. For every other program
@@ -878,6 +891,19 @@ func (r *InstanceRenderer) stateGlyph(i *session.Instance, beingNamed, selected 
 		return paint(pausedStyle, notStartedIcon)
 	}
 	return paint(pausedStyle, notStartedIcon)
+}
+
+// shellFrame is the shell animation's frame for the spinner's current tick.
+func (r *InstanceRenderer) shellFrame() string {
+	if r.spinner != nil {
+		frame := r.spinner.View()
+		for i, f := range r.spinner.Spinner.Frames {
+			if f == frame {
+				return shellFrames[i%len(shellFrames)]
+			}
+		}
+	}
+	return shellLegendFrame
 }
 
 // busyMark is the verb of an action in flight, for the right-hand end of the
@@ -1890,10 +1916,9 @@ func BadgeLegend(width int) []string {
 			pair(pausedStyle, strings.TrimSpace(notStartedIcon), "not started, or PR settled"),
 		},
 		{
-			// One frame of the animation, twice. The two states differ only in
-			// colour, which is exactly the thing a legend is for.
+			// One frame of each animation: they turn on the same tick.
 			pair(workingStyle, spinnerLegendFrame, "agent working"),
-			pair(shellStyle, spinnerLegendFrame, "shell still running"),
+			pair(shellStyle, shellLegendFrame, "shell still running"),
 		},
 		{
 			doneChipStyle.Render(doneChip) + dim.Render(" just finished"),
