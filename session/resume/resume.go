@@ -163,6 +163,29 @@ type transcriptRecord struct {
 	Message   json.RawMessage `json:"message"`
 }
 
+// ByID returns the transcript of the conversation sessionID in workdir,
+// described as Find describes one, when it is on disk with something in it.
+//
+// Several sessions can share a workdir -- every session that runs in the
+// repository itself does -- so the newest transcript there is not necessarily
+// this session's. A caller that knows which conversation it means asks for it.
+func ByID(workdir, sessionID string) (Transcript, bool) {
+	if !Exists(workdir, sessionID) {
+		return Transcript{}, false
+	}
+	path, err := TranscriptPath(workdir, sessionID)
+	if err != nil {
+		return Transcript{}, false
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return Transcript{}, false
+	}
+	transcript := Transcript{SessionID: sessionID, Path: path, ModTime: info.ModTime()}
+	describe(&transcript)
+	return transcript, true
+}
+
 // describe fills in the fields that can only be had by reading the file: which
 // directory and branch the conversation ran in, and the first thing the user
 // actually said.

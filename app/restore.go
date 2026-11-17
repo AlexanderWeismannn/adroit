@@ -55,7 +55,14 @@ func (m *home) recordKilledSession(instance *session.Instance) {
 		record.RepoPath = worktree.GetRepoPath()
 	}
 
-	if transcript, ok := resume.Find(workdir); ok {
+	// The session's own conversation when it recorded one. The newest
+	// transcript in the directory is only the fallback: sessions running in the
+	// repository itself all share it, and the newest there may be another's.
+	transcript, ok := resume.ByID(workdir, instance.GetSessionID())
+	if !ok && instance.GetSessionID() == "" {
+		transcript, ok = resume.Find(workdir)
+	}
+	if ok {
 		record.SessionID = transcript.SessionID
 		record.TranscriptPath = transcript.Path
 		record.Summary = transcript.Summary

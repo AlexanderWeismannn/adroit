@@ -835,6 +835,14 @@ func (i *Instance) Started() bool {
 	return i.started
 }
 
+// GetSessionID is the conversation the program was last started on, read under
+// the lock; "" when none was recorded.
+func (i *Instance) GetSessionID() string {
+	i.mu.RLock()
+	defer i.mu.RUnlock()
+	return i.SessionID
+}
+
 // setSessionID records the conversation the program is started on. Written by
 // Start and Resume, off the update loop, while the loop may be saving the row.
 func (i *Instance) setSessionID(id string) {

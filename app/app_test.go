@@ -943,6 +943,40 @@ func TestKilledSessionIsRecordedWithItsConversation(t *testing.T) {
 	assert.Equal(t, "TASK-9", restored.Title)
 }
 
+// Sessions that run in the repository itself share one directory, and so one
+// folder of transcripts. The record took the newest transcript in it, so killing
+// one of them recorded whichever conversation had last been written -- often
+// another session's -- and R restored that one. A session that knows its own
+// conversation is recorded with it.
+func TestAKilledSessionIsRecordedWithItsOwnConversationNotTheNewest(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	workdir := t.TempDir()
+	projectDir, err := resume.ProjectDir(workdir)
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(projectDir, 0o755))
+	write := func(id, said string, at time.Time) {
+		path := filepath.Join(projectDir, id+".jsonl")
+		require.NoError(t, os.WriteFile(path, []byte(`{"type":"user","sessionId":"`+id+`","cwd":"`+workdir+
+			`","message":{"role":"user","content":"`+said+`"}}`+"\n"), 0o644))
+		require.NoError(t, os.Chtimes(path, at, at))
+	}
+	write("mine", "fix the importer", time.Now().Add(-time.Hour))
+	write("theirs", "something else entirely", time.Now())
+
+	instance, err := session.FromInstanceData(session.InstanceData{
+		Title: "repo", Path: workdir, Status: session.Paused, NoWorktree: true,
+		Program: "claude", SessionID: "mine"})
+	require.NoError(t, err)
+	state := &fakeAppState{}
+	h := newDevStackHome(t, dev.New(nil), state)
+
+	h.recordKilledSession(instance)
+
+	require.Len(t, state.killed, 1)
+	assert.Equal(t, "mine", state.killed[0].SessionID)
+	assert.Equal(t, "fix the importer", state.killed[0].Summary)
+}
+
 // Two sessions cannot share a title: it names the tmux session and the branch,
 // so tmux refuses the second one outright.
 func TestRestoringTwiceGivesTheSecondSessionItsOwnName(t *testing.T) {
