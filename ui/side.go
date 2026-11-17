@@ -11,6 +11,7 @@ import (
 	"github.com/AlexanderWeismannn/adroit/session/dev"
 	"github.com/AlexanderWeismannn/adroit/session/upstream"
 	"github.com/AlexanderWeismannn/adroit/theme"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // Side is the status column of the wide layout: everything known about the
@@ -133,8 +134,17 @@ func (s *Side) lines() []string {
 	st := i.GetCIStatus()
 	if st.State != ci.StateNoPR && st.PRNumber > 0 {
 		pr := []string{heading("Pull request", "")}
-		// Without the number: the line already leads with it.
-		plain, styled := renderBadges(rowBadges(st, upstream.Status{}), lipgloss.NoColor{}, false, rankHistory)
+		// Without the number: the line already leads with it. The words give
+		// way by urgency, as on the row, rather than being cut at the border.
+		lead := fmt.Sprintf("#%d · ", st.PRNumber)
+		badges := rowBadges(st, upstream.Status{})
+		var plain, styled string
+		for _, lv := range badgeLevels[1:] {
+			plain, styled = renderBadges(badges, lipgloss.NoColor{}, false, lv.minRank)
+			if 2+len(lead)+ansi.StringWidth(plain) <= s.width-3 {
+				break
+			}
+		}
 		if plain != "" {
 			pr = append(pr, fact(sideTextStyle.Render(fmt.Sprintf("#%d", st.PRNumber))+" · "+styled))
 		}
