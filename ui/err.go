@@ -27,8 +27,9 @@ type ErrBox struct {
 const errIcon = "✗ "
 
 // noticeIcon does the same for the other kind, and must not be mistakable for
-// it at a glance.
-const noticeIcon = "✓ "
+// it at a glance -- nor for a success: a notice is often "nothing to do", and
+// the ✓ it used to wear is a passing build on the rows above.
+const noticeIcon = "› "
 
 // Pure #FF0000 is harsher than anything else on screen and reads as a crash
 // rather than as "that did not work". theme.Danger is the red the diff stats and

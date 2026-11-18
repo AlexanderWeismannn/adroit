@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseNumstat(t *testing.T) {
@@ -182,5 +183,132 @@ func TestResolveDiffBase_NeverMovesEarlierThanTheRecordedBase(t *testing.T) {
 	}
 	if got != parent {
 		t.Fatalf("resolveDiffBase() = %q, want the recorded parent-branch base %q", got, parent)
+	}
+}
+
+// newSessionWorktree is a repository with one commit on master, mirrored to
+// origin/master, and a session worktree on feature/test forked from it.
+func newSessionWorktree(t *testing.T) (*GitWorktree, string) {
+	t.Helper()
+	tempHome := t.TempDir()
+	t.Setenv("HOME", tempHome)
+
+	repoPath := filepath.Join(t.TempDir(), "repo")
+	mustRunGit(t, "", "init", "-b", "master", repoPath)
+	mustRunGit(t, repoPath, "config", "user.name", "Test User")
+	mustRunGit(t, repoPath, "config", "user.email", "test@example.com")
+	if err := os.WriteFile(filepath.Join(repoPath, "a.txt"), []byte("a\n"), 0644); err != nil {
+		t.Fatalf("write a.txt: %v", err)
+	}
+	mustRunGit(t, repoPath, "add", "a.txt")
+	mustRunGit(t, repoPath, "commit", "-m", "initial")
+	mustRunGit(t, repoPath, "update-ref", "refs/remotes/origin/master", "HEAD")
+	mustRunGit(t, repoPath, "branch", "feature/test")
+
+	g := &GitWorktree{
+		repoPath:         repoPath,
+		worktreePath:     filepath.Join(tempHome, ".adroit", "worktrees", "feature-test"),
+		branchName:       "feature/test",
+		baseBranch:       "master",
+		isExistingBranch: true,
+	}
+	if err := g.Setup(); err != nil {
+		t.Fatalf("Setup() error = %v", err)
+	}
+	g.baseCommitSHA = strings.TrimSpace(mustRunGit(t, repoPath, "rev-parse", "HEAD"))
+	return g, repoPath
+}
+
+// Staging copies the whole real index -- 2.6MB on a large repository -- and
+// rewrites it with the add. Done for every session every fifteen seconds and for
+// the selected one on every diff, whether anything had changed or not, it was
+// megabytes a second of disk writes. A staging that would come out the same is
+// skipped; a new untracked file is still staged at once.
+func TestStagingUntrackedIsSkippedUntilSomethingChanged(t *testing.T) {
+	g, _ := newSessionWorktree(t)
+	write := func(name, body string) {
+		if err := os.WriteFile(filepath.Join(g.worktreePath, name), []byte(body), 0644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	write("mine.txt", "a\nb\nc\n")
+
+	stats := g.DiffNumstat(true)
+	if stats.Error != nil || stats.Added != 3 {
+		t.Fatalf("DiffNumstat() = +%d (%v), want +3", stats.Added, stats.Error)
+	}
+	private, err := g.privateIndexPath()
+	if err != nil {
+		t.Fatalf("privateIndexPath() error = %v", err)
+	}
+	// Back-dated, so a rewrite shows as a fresh modification time.
+	old := time.Now().Add(-time.Hour).Truncate(time.Second)
+	if err := os.Chtimes(private, old, old); err != nil {
+		t.Fatalf("back-date private index: %v", err)
+	}
+
+	if stats := g.Diff(); stats.Error != nil || stats.Added != 3 {
+		t.Fatalf("Diff() = +%d (%v), want +3", stats.Added, stats.Error)
+	}
+	after, err := os.Stat(private)
+	if err != nil {
+		t.Fatalf("stat private index: %v", err)
+	}
+	if !after.ModTime().Equal(old) {
+		t.Fatalf("the private index was rewritten with nothing changed")
+	}
+
+	write("other.txt", "d\ne\n")
+	if stats := g.DiffNumstat(true); stats.Error != nil || stats.Added != 5 {
+		t.Fatalf("DiffNumstat() after a new untracked file = +%d (%v), want +5", stats.Added, stats.Error)
+	}
+}
+
+// The resolved base is kept only while what it was worked out from stands. It
+// used to be kept for 30 seconds whatever happened, so a fetch that moved the
+// base branch left the counts measured from the old fork point until it ran out.
+func TestResolveDiffBaseFollowsTheBaseBranchAtOnce(t *testing.T) {
+	g, repoPath := newSessionWorktree(t)
+	first, err := g.resolveDiffBase()
+	if err != nil {
+		t.Fatalf("resolveDiffBase() error = %v", err)
+	}
+
+	// The session merges in a newer origin/master: the fork point moves forward.
+	if err := os.WriteFile(filepath.Join(repoPath, "b.txt"), []byte("b\n"), 0644); err != nil {
+		t.Fatalf("write b.txt: %v", err)
+	}
+	mustRunGit(t, repoPath, "add", "b.txt")
+	mustRunGit(t, repoPath, "commit", "-m", "upstream")
+	mustRunGit(t, repoPath, "update-ref", "refs/remotes/origin/master", "HEAD")
+	mustRunGit(t, g.worktreePath, "merge", "--ff-only", "origin/master")
+	want := strings.TrimSpace(mustRunGit(t, repoPath, "rev-parse", "HEAD"))
+
+	got, err := g.resolveDiffBase()
+	if err != nil {
+		t.Fatalf("resolveDiffBase() error = %v", err)
+	}
+	if got == first || got != want {
+		t.Fatalf("resolveDiffBase() = %q, want the new fork point %q", got, want)
+	}
+}
+
+// ChangedSinceDiff is what lets a still session back its diff off: it must see
+// a commit made with nothing on screen, or the counts sit stale for a minute.
+func TestChangedSinceDiffSeesACommit(t *testing.T) {
+	g, _ := newSessionWorktree(t)
+	if stats := g.DiffNumstat(false); stats.Error != nil {
+		t.Fatalf("DiffNumstat() error = %v", stats.Error)
+	}
+	if g.ChangedSinceDiff() {
+		t.Fatalf("ChangedSinceDiff() = true with nothing done")
+	}
+	if err := os.WriteFile(filepath.Join(g.worktreePath, "c.txt"), []byte("c\n"), 0644); err != nil {
+		t.Fatalf("write c.txt: %v", err)
+	}
+	mustRunGit(t, g.worktreePath, "add", "c.txt")
+	mustRunGit(t, g.worktreePath, "commit", "-m", "work")
+	if !g.ChangedSinceDiff() {
+		t.Fatalf("ChangedSinceDiff() = false after a commit")
 	}
 }

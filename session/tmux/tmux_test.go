@@ -802,3 +802,91 @@ func TestIsHuskNeedsAnIdleShellWithNothingUnderIt(t *testing.T) {
 		require.False(t, session.IsHusk())
 	})
 }
+
+// A session that never appears is given up on after two seconds. The client
+// that new-session ran under was left with its PTY open and nobody to wait for
+// it, so each such timeout leaked a descriptor and a process.
+func TestAStartThatTimesOutDoesNotLeaveItsClientBehind(t *testing.T) {
+	factory := &realProcessPtyFactory{t: t}
+	cmdExec := cmd_test.MockCmdExec{RunFunc: func(cmd *exec.Cmd) error {
+		if strings.Contains(cmd.String(), "has-session") {
+			return fmt.Errorf("can't find session")
+		}
+		return nil
+	}}
+
+	session := NewTmuxSessionWithDeps("never-appears", "program", factory, cmdExec)
+	require.Error(t, session.Start(t.TempDir()))
+	require.Len(t, factory.pids, 1)
+
+	require.Eventually(t, func() bool {
+		return processState(t, factory.pids[0]) == ""
+	}, 5*time.Second, 25*time.Millisecond, "the timed-out start left its client running")
+}
+
+// tmux keeps activity to the second, so a capture is only proof of output that
+// landed in an EARLIER second. Trusting output from the capture's own second
+// would let the last thing a session draws -- the turn finishing, a prompt
+// appearing -- go unseen until the floor, with the row showing the old state.
+func TestProbeFreshOnlyTrustsWhatTheCaptureMustHaveSeen(t *testing.T) {
+	at := time.Unix(1000, 500_000_000)
+	tests := []struct {
+		name     string
+		obs      paneActivity
+		observed bool
+		known    bool
+		now      time.Time
+		fresh    bool
+	}{
+		{"output in an earlier second was captured", paneActivity{last: 999, size: "80x24 "}, true, true, at.Add(time.Second), true},
+		{"output in the capture's own second may have come after it", paneActivity{last: 1000, size: "80x24 "}, true, true, at.Add(time.Second), false},
+		{"output since the capture", paneActivity{last: 1001, size: "80x24 "}, true, true, at.Add(2 * time.Second), false},
+		{"a resize can rewrap the screen without output", paneActivity{last: 999, size: "100x24 "}, true, true, at.Add(time.Second), false},
+		{"a session tmux did not list", paneActivity{}, false, true, at.Add(time.Second), false},
+		{"no capture to stand on", paneActivity{last: 999, size: "80x24 "}, true, false, at.Add(time.Second), false},
+		{"the floor recaptures a still pane", paneActivity{last: 999, size: "80x24 "}, true, true, at.Add(paneProbeFloor), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := &paneProbe{at: at, size: "80x24 ", known: tt.known}
+			require.Equal(t, tt.fresh, probeFresh(tt.obs, tt.observed, p, tt.now))
+		})
+	}
+}
+
+// The whole point of the activity: a pane that has drawn nothing is not
+// captured again, and one that has is. Every active session used to be captured
+// twice a second regardless -- 17 of the 22 forks a second an idle list of eight
+// cost.
+func TestPollPaneSeenCapturesOnlyAPaneThatHasDrawn(t *testing.T) {
+	isolateTmuxServer(t)
+	name := toAdroitTmuxName("probe")
+	require.NoError(t, exec.Command("tmux", "new-session", "-d", "-s", name, "cat").Run())
+
+	captures := 0
+	real := cmd2.MakeExecutor()
+	counting := cmd_test.MockCmdExec{
+		RunFunc: real.Run,
+		OutputFunc: func(c *exec.Cmd) ([]byte, error) {
+			if len(c.Args) > 1 && c.Args[1] == "capture-pane" {
+				captures++
+			}
+			return real.Output(c)
+		},
+	}
+	s := newTmuxSession("probe", "claude", MakePtyFactory(), counting)
+	s.monitor = newStatusMonitor()
+
+	// Let the session's start-up output fall into an earlier second than the
+	// first capture, which is what the activity rule needs to trust it.
+	time.Sleep(1100 * time.Millisecond)
+	require.True(t, s.PollPaneSeen(ReadActivity(counting)).Updated)
+	require.Equal(t, 1, captures)
+
+	require.False(t, s.PollPaneSeen(ReadActivity(counting)).Updated)
+	require.Equal(t, 1, captures, "a pane that has drawn nothing is not captured again")
+
+	require.NoError(t, counting.Run(exec.Command("tmux", "send-keys", "-t", PaneTarget(name), "-l", "hello")))
+	require.Eventually(t, func() bool { return s.PollPaneSeen(ReadActivity(counting)).Updated }, 2*time.Second, 50*time.Millisecond)
+	require.GreaterOrEqual(t, captures, 2)
+}

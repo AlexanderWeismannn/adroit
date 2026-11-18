@@ -68,6 +68,9 @@ type TmuxSession struct {
 	ptyCmd *exec.Cmd
 	// monitor monitors the tmux pane content and sends signals to the UI when it's status changes
 	monitor *statusMonitor
+	// probe is what PollPane last read off the pane, kept so a pane tmux says has
+	// not drawn anything since is not captured again; see PollPaneSeen.
+	probe paneProbe
 	// requestedCols/requestedRows are the shape the UI last asked for while detached.
 	// Every PTY we open starts at 0x0, which tmux clamps to default-size (80x24), and
 	// nothing re-applies the size afterwards -- so a session whose PTY was replaced
@@ -269,6 +272,12 @@ func (t *TmuxSession) Start(workDir string) error {
 	for !t.DoesSessionExist() {
 		select {
 		case <-timeout:
+			// The client this started is ours alone -- t.Close knows nothing of it
+			// -- so it is released here, as on the way out below: the master
+			// closed and the process reaped, or every timeout left a descriptor
+			// open and a client running into a zombie.
+			_ = ptmx.Close()
+			go reapPty(cmd, t.sanitizedName)
 			if cleanupErr := t.Close(); cleanupErr != nil {
 				err = fmt.Errorf("%v (cleanup error: %v)", err, cleanupErr)
 			}
@@ -605,12 +614,21 @@ var ansiSeq = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]`)
 // own styling sits between the very characters being matched: the footer arrives
 // as "\x1b[37m · \x1b[96m1 shell\x1b[37m · ", and a pattern written against
 // what the terminal displays misses it every time.
+//
+// The lines are cut before the escapes are stripped, not after: a capture is
+// tens of kilobytes and the probes read at most paneStatusLines of it, three
+// times per capture. No escape spans a newline, so the order changes nothing
+// but the cost.
 func paneTail(content string, n int) string {
-	lines := strings.Split(ansiSeq.ReplaceAllString(content, ""), "\n")
-	if len(lines) > n {
-		lines = lines[len(lines)-n:]
+	end := len(content)
+	for i := 0; i < n; i++ {
+		j := strings.LastIndexByte(content[:end], '\n')
+		if j < 0 {
+			return ansiSeq.ReplaceAllString(content, "")
+		}
+		end = j
 	}
-	return strings.Join(lines, "\n")
+	return ansiSeq.ReplaceAllString(content[end+1:], "")
 }
 
 // claudeWorking matches Claude Code's in-flight status line: a gerund, an
@@ -677,39 +695,161 @@ func claudePaneProbe(content string) (working bool, backgroundShells int) {
 // footer probes all have to describe the same instant, and this runs on the
 // metadata tick for every active session.
 func (t *TmuxSession) PollPane() PaneState {
-	content, err := t.CapturePaneContent()
+	return t.PollPaneSeen(nil)
+}
+
+// Activity is what one `tmux list-panes -a` says about every session on the
+// server: when each last drew anything, and at what size. A nil Activity means
+// tmux could not be asked, and every pane is then captured as before.
+//
+// It exists because capturing is the dominant cost of the metadata tick. Every
+// active session was captured twice a second whether it was doing anything or
+// not -- 17 of the 22 forks a second an idle list of eight sessions cost -- and
+// one list-panes answers "has this pane drawn anything?" for all of them at once.
+type Activity map[string]paneActivity
+
+// paneActivity is one session's line of that answer.
+type paneActivity struct {
+	// last is the Unix second of the latest output in any of the session's
+	// windows. tmux keeps it to the second, which is what probeFresh has to
+	// account for.
+	last int64
+	// size is every pane's size, so a resize -- which can rewrap the screen
+	// without the program printing anything -- is noticed.
+	size string
+}
+
+// ReadActivity asks tmux for every session's activity in one fork. It returns
+// nil when tmux cannot answer, which PollPaneSeen reads as "capture everything".
+func ReadActivity(cmdExec cmd.Executor) Activity {
+	out, err := cmdExec.Output(exec.Command("tmux", "list-panes", "-a", "-F",
+		"#{session_name}\t#{window_activity}\t#{pane_width}x#{pane_height}"))
 	if err != nil {
-		// A session that has gone is a state to report, not an error to repeat:
-		// this runs twice a second, and logging it each time is what used to
-		// bury everything else in the log until the next restart noticed.
-		if !t.DoesSessionExist() {
-			return PaneState{Gone: true}
-		}
-		if !t.captureFailing {
-			log.ErrorLog.Printf("error capturing pane content in status monitor: %v", err)
-		}
-		t.captureFailing = true
-		return PaneState{}
+		return nil
 	}
+	return parseActivity(string(out))
+}
+
+// parseActivity reads list-panes output. A session with an unreadable activity
+// is left out, which makes it captured: a guess here could only ever be a pane
+// wrongly reported as still.
+func parseActivity(out string) Activity {
+	seen := Activity{}
+	bad := map[string]bool{}
+	for _, line := range strings.Split(out, "\n") {
+		fields := strings.Split(line, "\t")
+		if len(fields) != 3 || fields[0] == "" {
+			continue
+		}
+		name := fields[0]
+		last, err := strconv.ParseInt(fields[1], 10, 64)
+		if err != nil {
+			bad[name] = true
+			continue
+		}
+		a := seen[name]
+		a.last = max(a.last, last)
+		a.size += fields[2] + " "
+		seen[name] = a
+	}
+	for name := range bad {
+		delete(seen, name)
+	}
+	return seen
+}
+
+// StillFor is how long the session has gone without drawing anything, and
+// false when the activity does not cover it.
+func (a Activity) StillFor(t *TmuxSession, now time.Time) (time.Duration, bool) {
+	obs, ok := a[t.sanitizedName]
+	if !ok {
+		return 0, false
+	}
+	return max(now.Sub(time.Unix(obs.last, 0)), 0), true
+}
+
+// paneProbeFloor is the longest a pane goes uncaptured on the strength of tmux
+// saying it is still. The activity rule is exact for output; the floor is for
+// whatever changes a pane without either -- and a still session costs one
+// capture per floor instead of two a second.
+const paneProbeFloor = 5 * time.Second
+
+// paneRecentFresh is how old a capture taken by someone else -- the preview --
+// may be and still stand in for the probe's own. The preview captures the
+// selected session up to ten times a second, so the metadata tick capturing it
+// again a moment later was a second fork for the same screen.
+const paneRecentFresh = 400 * time.Millisecond
+
+// paneProbe is the state PollPaneSeen keeps between calls.
+type paneProbe struct {
+	mu sync.Mutex
+	// at is when the capture state was read off started, and size the pane's
+	// size as tmux reported it then. known is false until a capture succeeds.
+	at    time.Time
+	size  string
+	state PaneState
+	known bool
+	// recent is the newest capture CapturePaneContent took, and recentAt when
+	// it started.
+	recent   string
+	recentAt time.Time
+}
+
+// probeFresh reports whether a pane's last capture still describes it, so
+// capturing it again would only return the same screen.
+//
+// tmux keeps activity to the whole second, so output in the same second the
+// capture started may have landed after it: only activity in an EARLIER second
+// is proof the capture saw it. That costs at most one extra capture after the
+// pane goes still, and never misses the last thing a session draws.
+func probeFresh(obs paneActivity, observed bool, p *paneProbe, now time.Time) bool {
+	return observed && p.known &&
+		obs.size == p.size &&
+		obs.last < p.at.Unix() &&
+		now.Sub(p.at) < paneProbeFloor
+}
+
+// PollPaneSeen is PollPane with the server's activity in hand: a pane that has
+// drawn nothing since its last capture reports what that capture said, with
+// Updated false, rather than being captured again. seen may be nil.
+func (t *TmuxSession) PollPaneSeen(seen Activity) PaneState {
+	t.probe.mu.Lock()
+	defer t.probe.mu.Unlock()
+
+	now := time.Now()
+	obs, observed := seen[t.sanitizedName]
+	// A fresh monitor (Restore makes one) has no hash to compare against, and
+	// the first poll after it must report the pane as it is.
+	if t.monitor != nil && t.monitor.prevOutputHash != nil && probeFresh(obs, observed, &t.probe, now) {
+		return t.probe.state
+	}
+
+	var content string
+	at := now
+	if t.probe.recent != "" && now.Sub(t.probe.recentAt) < paneRecentFresh && !t.probe.recentAt.Before(t.probe.at) {
+		content, at = t.probe.recent, t.probe.recentAt
+	} else {
+		var err error
+		content, err = t.capture()
+		if err != nil {
+			t.probe.known = false
+			// A session that has gone is a state to report, not an error to repeat:
+			// this runs twice a second, and logging it each time is what used to
+			// bury everything else in the log until the next restart noticed.
+			if !t.DoesSessionExist() {
+				return PaneState{Gone: true}
+			}
+			if !t.captureFailing {
+				log.ErrorLog.Printf("error capturing pane content in status monitor: %v", err)
+			}
+			t.captureFailing = true
+			return PaneState{}
+		}
+	}
+	t.probe.recent = ""
 	t.captureFailing = false
 
-	var state PaneState
-
-	// Claude is recognised by its executable, not the whole command line, so a
-	// restored "claude --resume <id>" is still read; the other programs keep
-	// their original checks. aider and gemini have no probe that tells a prompt
-	// auto-yes can answer from any other question, so for them the two coincide.
-	if isClaudeProgram(t.program) {
-		state.Legible = true
-		state.Working, state.BackgroundShells = claudePaneProbe(content)
-		state.NeedsInput, state.HasPrompt = claudeQuestion(content)
-	} else if strings.HasPrefix(t.program, ProgramAider) {
-		state.HasPrompt = strings.Contains(content, "(Y)es/(N)o/(D)on't ask again")
-		state.NeedsInput = state.HasPrompt
-	} else if strings.HasPrefix(t.program, ProgramGemini) {
-		state.HasPrompt = strings.Contains(content, "Yes, allow once")
-		state.NeedsInput = state.HasPrompt
-	}
+	state := readPane(t.program, content)
 
 	// Hashed once, not once per comparison: the capture is tens of kilobytes and
 	// this runs per session per tick.
@@ -718,6 +858,32 @@ func (t *TmuxSession) PollPane() PaneState {
 		state.Updated = true
 	}
 
+	t.probe.at, t.probe.size, t.probe.known = at, obs.size, true
+	t.probe.state = state
+	t.probe.state.Updated = false
+	return state
+}
+
+// readPane is everything a capture says about the program in it, bar whether
+// it changed.
+func readPane(program, content string) PaneState {
+	var state PaneState
+
+	// Claude is recognised by its executable, not the whole command line, so a
+	// restored "claude --resume <id>" is still read; the other programs keep
+	// their original checks. aider and gemini have no probe that tells a prompt
+	// auto-yes can answer from any other question, so for them the two coincide.
+	if isClaudeProgram(program) {
+		state.Legible = true
+		state.Working, state.BackgroundShells = claudePaneProbe(content)
+		state.NeedsInput, state.HasPrompt = claudeQuestion(content)
+	} else if strings.HasPrefix(program, ProgramAider) {
+		state.HasPrompt = strings.Contains(content, "(Y)es/(N)o/(D)on't ask again")
+		state.NeedsInput = state.HasPrompt
+	} else if strings.HasPrefix(program, ProgramGemini) {
+		state.HasPrompt = strings.Contains(content, "Yes, allow once")
+		state.NeedsInput = state.HasPrompt
+	}
 	return state
 }
 
@@ -1327,7 +1493,22 @@ func normalizeCapture(s string) string {
 }
 
 // CapturePaneContent captures the content of the tmux pane
+//
+// The capture is also offered to the next PollPaneSeen, which uses it in place
+// of its own while it is fresh.
 func (t *TmuxSession) CapturePaneContent() (string, error) {
+	at := time.Now()
+	content, err := t.capture()
+	if err == nil {
+		t.probe.mu.Lock()
+		t.probe.recent, t.probe.recentAt = content, at
+		t.probe.mu.Unlock()
+	}
+	return content, err
+}
+
+// capture is one capture-pane of the session's pane.
+func (t *TmuxSession) capture() (string, error) {
 	// Add -e flag to preserve escape sequences (ANSI color codes)
 	cmd := exec.Command("tmux", "capture-pane", "-p", "-e", "-J", "-t", PaneTarget(t.sanitizedName))
 	output, err := t.cmdExec.Output(cmd)

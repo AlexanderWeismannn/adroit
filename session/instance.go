@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/atotto/clipboard"
@@ -197,6 +198,17 @@ type Instance struct {
 	// The below fields are initialized upon calling Start().
 
 	started bool
+	// mu guards started, Status, Branch, SessionID and the two session
+	// pointers against the one writer that is not on the update loop: Start,
+	// Pause and Resume run on a Cmd's goroutine while the interface goes on
+	// reading the row. Held only around the field itself, never across a call.
+	//
+	// Readers that go through Started, Paused, GetBranch, DisplayBranch,
+	// GetWorktreePath, GetGitWorktree or ToInstanceData are covered, and so is
+	// everything Start wrote before it published started, for a reader that
+	// checked Started first. Direct reads of the exported Status field outside
+	// this package are not.
+	mu sync.RWMutex
 	// tmuxSession is the tmux session for the instance.
 	tmuxSession *tmux.TmuxSession
 	// gitWorktree is the git worktree for the instance.
@@ -205,6 +217,8 @@ type Instance struct {
 
 // ToInstanceData converts an Instance to its serializable form
 func (i *Instance) ToInstanceData() InstanceData {
+	i.mu.RLock()
+	defer i.mu.RUnlock()
 	data := InstanceData{
 		Title:        i.Title,
 		LastActiveAt: i.lastActiveAt,
@@ -374,10 +388,29 @@ func (i *Instance) SetStatus(status Status) {
 	// Running is the only status the content hash can assert on its own, and for
 	// a program whose interface cannot be parsed it is the sole evidence the
 	// session is doing anything. Stamped here so those sessions age too.
+	i.mu.Lock()
+	defer i.mu.Unlock()
 	if status == Running {
 		i.lastActiveAt = time.Now()
 	}
 	i.Status = status
+}
+
+// GetStatus is Status read under the lock, for a reader that may be running
+// beside Start, Pause or Resume -- which is any reader on the update loop.
+func (i *Instance) GetStatus() Status {
+	i.mu.RLock()
+	defer i.mu.RUnlock()
+	return i.Status
+}
+
+func (i *Instance) status() Status { return i.GetStatus() }
+
+// GetBranch is Branch read under the lock; Start sets it off the update loop.
+func (i *Instance) GetBranch() string {
+	i.mu.RLock()
+	defer i.mu.RUnlock()
+	return i.Branch
 }
 
 // LastActiveAt is when this session was last doing something, or the zero time
@@ -420,7 +453,9 @@ func (i *Instance) Start(firstTimeSetup bool) error {
 		// Create new tmux session
 		tmuxSession = tmux.NewTmuxSession(i.Title, i.Program)
 	}
+	i.mu.Lock()
 	i.tmuxSession = tmuxSession
+	i.mu.Unlock()
 
 	if firstTimeSetup && !i.noWorktree {
 		if i.selectedBranch != "" {
@@ -428,15 +463,19 @@ func (i *Instance) Start(firstTimeSetup bool) error {
 			if err != nil {
 				return fmt.Errorf("failed to create git worktree from branch: %w", err)
 			}
+			i.mu.Lock()
 			i.gitWorktree = gitWorktree
 			i.Branch = i.selectedBranch
+			i.mu.Unlock()
 		} else {
 			gitWorktree, branchName, err := git.NewGitWorktree(i.Path, i.Title)
 			if err != nil {
 				return fmt.Errorf("failed to create git worktree: %w", err)
 			}
+			i.mu.Lock()
 			i.gitWorktree = gitWorktree
 			i.Branch = branchName
+			i.mu.Unlock()
 		}
 	}
 
@@ -448,7 +487,9 @@ func (i *Instance) Start(firstTimeSetup bool) error {
 				setupErr = fmt.Errorf("%v (cleanup error: %v)", setupErr, cleanupErr)
 			}
 		} else {
+			i.mu.Lock()
 			i.started = true
+			i.mu.Unlock()
 		}
 	}()
 
@@ -593,7 +634,7 @@ func (i *Instance) launchCommandFor(dir string) string {
 	if i.SessionID == "" {
 		if transcript, ok := resume.Sole(dir); ok {
 			log.InfoLog.Printf("adopting the conversation already in %s for %q", dir, i.Title)
-			i.SessionID = transcript.SessionID
+			i.setSessionID(transcript.SessionID)
 			i.resumedConversation = true
 			return resume.Command(i.Program, i.SessionID)
 		}
@@ -608,10 +649,10 @@ func (i *Instance) launchCommandFor(dir string) string {
 	if err != nil {
 		log.WarningLog.Printf(
 			"could not name a conversation for %q, so it will not be resumable: %v", i.Title, err)
-		i.SessionID = ""
+		i.setSessionID("")
 		return i.Program
 	}
-	i.SessionID = id
+	i.setSessionID(id)
 	return resume.StartCommand(i.Program, id)
 }
 
@@ -654,7 +695,7 @@ func (i *Instance) prepareWorkspace(dir string) error {
 
 // Kill terminates the instance and cleans up all resources
 func (i *Instance) Kill() error {
-	if !i.started {
+	if !i.Started() {
 		// If instance was never started, just return success
 		return nil
 	}
@@ -696,7 +737,7 @@ func (i *Instance) combineErrors(errs []error) error {
 }
 
 func (i *Instance) Preview() (string, error) {
-	if !i.started || i.Status == Paused {
+	if !i.Started() || i.status() == Paused {
 		return "", nil
 	}
 	return i.tmuxSession.CapturePaneContent()
@@ -705,7 +746,7 @@ func (i *Instance) Preview() (string, error) {
 // PollPane captures this session's pane once and reports everything the capture
 // says. A session with no pane -- unstarted, or parked -- reports nothing.
 func (i *Instance) PollPane() tmux.PaneState {
-	if !i.started || i.Status == Paused {
+	if !i.Started() || i.status() == Paused {
 		return tmux.PaneState{}
 	}
 	return i.tmuxSession.PollPane()
@@ -713,7 +754,7 @@ func (i *Instance) PollPane() tmux.PaneState {
 
 // CheckAndHandleTrustPrompt checks for and dismisses the trust prompt for supported programs.
 func (i *Instance) CheckAndHandleTrustPrompt() bool {
-	if !i.started || i.tmuxSession == nil {
+	if !i.Started() || i.tmuxSession == nil {
 		return false
 	}
 	program := i.Program
@@ -727,7 +768,7 @@ func (i *Instance) CheckAndHandleTrustPrompt() bool {
 
 // TapEnter sends an enter key press to the tmux session if AutoYes is enabled.
 func (i *Instance) TapEnter() {
-	if !i.started || !i.AutoYes {
+	if !i.Started() || !i.AutoYes {
 		return
 	}
 	if err := i.tmuxSession.TapEnter(); err != nil {
@@ -736,14 +777,14 @@ func (i *Instance) TapEnter() {
 }
 
 func (i *Instance) Attach() (chan struct{}, error) {
-	if !i.started {
+	if !i.Started() {
 		return nil, fmt.Errorf("cannot attach instance that has not been started")
 	}
 	return i.tmuxSession.Attach()
 }
 
 func (i *Instance) SetPreviewSize(width, height int) error {
-	if !i.started || i.Status == Paused {
+	if !i.Started() || i.status() == Paused {
 		return fmt.Errorf("cannot set preview size for instance that has not been started or " +
 			"is paused")
 	}
@@ -752,7 +793,7 @@ func (i *Instance) SetPreviewSize(width, height int) error {
 
 // GetGitWorktree returns the git worktree for the instance
 func (i *Instance) GetGitWorktree() (*git.GitWorktree, error) {
-	if !i.started {
+	if !i.Started() {
 		return nil, fmt.Errorf("cannot get git worktree for instance that has not been started")
 	}
 	// Never nil for a worktree-backed session, and an error rather than a nil
@@ -766,10 +807,13 @@ func (i *Instance) GetGitWorktree() (*git.GitWorktree, error) {
 
 // GetWorktreePath returns the worktree path for the instance, or empty string if unavailable
 func (i *Instance) GetWorktreePath() string {
-	if i.gitWorktree == nil {
+	i.mu.RLock()
+	worktree := i.gitWorktree
+	i.mu.RUnlock()
+	if worktree == nil {
 		return ""
 	}
-	return i.gitWorktree.GetWorktreePath()
+	return worktree.GetWorktreePath()
 }
 
 // DevDir is the directory a development stack should run in for this session.
@@ -786,13 +830,31 @@ func (i *Instance) DevDir() string {
 }
 
 func (i *Instance) Started() bool {
+	i.mu.RLock()
+	defer i.mu.RUnlock()
 	return i.started
+}
+
+// GetSessionID is the conversation the program was last started on, read under
+// the lock; "" when none was recorded.
+func (i *Instance) GetSessionID() string {
+	i.mu.RLock()
+	defer i.mu.RUnlock()
+	return i.SessionID
+}
+
+// setSessionID records the conversation the program is started on. Written by
+// Start and Resume, off the update loop, while the loop may be saving the row.
+func (i *Instance) setSessionID(id string) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	i.SessionID = id
 }
 
 // SetTitle sets the title of the instance. Returns an error if the instance has started.
 // We cant change the title once it's been used for a tmux session etc.
 func (i *Instance) SetTitle(title string) error {
-	if i.started {
+	if i.Started() {
 		return fmt.Errorf("cannot change title of a started instance")
 	}
 	i.Title = title
@@ -800,7 +862,7 @@ func (i *Instance) SetTitle(title string) error {
 }
 
 func (i *Instance) Paused() bool {
-	return i.Status == Paused
+	return i.status() == Paused
 }
 
 // MarkGone parks a session whose tmux session has disappeared while it was
@@ -813,6 +875,8 @@ func (i *Instance) Paused() bool {
 // Not reported as a finish: nothing finished, and ringing the bell for it would
 // say so.
 func (i *Instance) MarkGone() {
+	i.mu.Lock()
+	defer i.mu.Unlock()
 	if i.Status == Paused {
 		return
 	}
@@ -856,7 +920,7 @@ func (i *Instance) TmuxAlive() bool {
 
 // Pause stops the tmux session and removes the worktree, preserving the branch
 func (i *Instance) Pause() error {
-	if !i.started {
+	if !i.Started() {
 		return fmt.Errorf("cannot pause instance that has not been started")
 	}
 	// Pausing commits the worktree's changes and removes it. There is no worktree
@@ -865,7 +929,7 @@ func (i *Instance) Pause() error {
 	if i.noWorktree {
 		return fmt.Errorf("session %q runs in the repository itself, so there is no worktree to check out", i.Title)
 	}
-	if i.Status == Paused {
+	if i.status() == Paused {
 		return fmt.Errorf("instance is already paused")
 	}
 
@@ -964,10 +1028,10 @@ func (i *Instance) discardHusk() bool {
 
 // Resume recreates the worktree and restarts the tmux session
 func (i *Instance) Resume() error {
-	if !i.started {
+	if !i.Started() {
 		return fmt.Errorf("cannot resume instance that has not been started")
 	}
-	if i.Status != Paused {
+	if i.status() != Paused {
 		return fmt.Errorf("can only resume paused instances")
 	}
 	// A worktree-less session is never paused by the user -- Pause refuses it. It
@@ -1049,38 +1113,12 @@ func (i *Instance) Resume() error {
 	return nil
 }
 
-// UpdateDiffStats updates the git diff statistics for this instance
-func (i *Instance) UpdateDiffStats() error {
-	if !i.started || i.gitWorktree == nil {
-		i.diffStats = nil
-		return nil
-	}
-
-	if i.Status == Paused {
-		// Keep the previous diff stats if the instance is paused
-		return nil
-	}
-
-	stats := i.gitWorktree.Diff()
-	if stats.Error != nil {
-		if strings.Contains(stats.Error.Error(), "base commit SHA not set") {
-			// Worktree is not fully set up yet, not an error
-			i.diffStats = nil
-			return nil
-		}
-		return fmt.Errorf("failed to get diff stats: %w", stats.Error)
-	}
-
-	i.diffStats = stats
-	return nil
-}
-
 // ComputeDiff runs the expensive git diff I/O and returns the result without
 // mutating instance state. Safe to call from a background goroutine.
 func (i *Instance) ComputeDiff() *git.DiffStats {
 	// A worktree-less session has no isolated change set to report: whatever is
 	// in the repository is the user's own working tree, not this session's work.
-	if !i.started || i.Status == Paused || i.gitWorktree == nil {
+	if !i.Started() || i.status() == Paused || i.gitWorktree == nil {
 		return nil
 	}
 	return i.gitWorktree.Diff()
@@ -1093,7 +1131,7 @@ func (i *Instance) ComputeDiff() *git.DiffStats {
 func (i *Instance) ComputeDiffNumstat(stageUntracked bool) *git.DiffStats {
 	// A worktree-less session has no isolated change set to report: whatever is
 	// in the repository is the user's own working tree, not this session's work.
-	if !i.started || i.Status == Paused || i.gitWorktree == nil {
+	if !i.Started() || i.status() == Paused || i.gitWorktree == nil {
 		return nil
 	}
 	return i.gitWorktree.DiffNumstat(stageUntracked)
@@ -1108,13 +1146,6 @@ func (i *Instance) SetDiffStats(stats *git.DiffStats, hasContent bool) {
 	i.diffStats = stats
 	i.diffStatsAt = time.Now()
 	i.diffStatsHasContent = hasContent && stats != nil
-}
-
-// DiffStatsAt is when the current diff stats were computed. Exact identity for
-// anything that caches a rendering of them: the timestamp only moves when the
-// stats were actually recomputed.
-func (i *Instance) DiffStatsAt() time.Time {
-	return i.diffStatsAt
 }
 
 // UntrackedStale reports whether the next diff should pay for the untracked-file
@@ -1235,7 +1266,7 @@ func (i *Instance) BranchStale(maxAge time.Duration) bool {
 //
 // Safe to call off the main thread: it touches no instance state.
 func (i *Instance) ResolveCurrentBranch() string {
-	if !i.started || i.gitWorktree == nil {
+	if !i.Started() || i.gitWorktree == nil {
 		return ""
 	}
 	branch, err := git.CurrentBranch(i.gitWorktree.GetWorktreePath())
@@ -1258,12 +1289,12 @@ func (i *Instance) DisplayBranch() string {
 	if i.currentBranch != "" {
 		return i.currentBranch
 	}
-	return i.Branch
+	return i.GetBranch()
 }
 
 // SendPrompt sends a prompt to the tmux session
 func (i *Instance) SendPrompt(prompt string) error {
-	if !i.started {
+	if !i.Started() {
 		return fmt.Errorf("instance not started")
 	}
 	if i.tmuxSession == nil {
@@ -1291,7 +1322,7 @@ func (i *Instance) SendPrompt(prompt string) error {
 
 // PreviewFullHistory captures the entire tmux pane output including full scrollback history
 func (i *Instance) PreviewFullHistory() (string, error) {
-	if !i.started || i.Status == Paused {
+	if !i.Started() || i.status() == Paused {
 		return "", nil
 	}
 	return i.tmuxSession.CapturePaneContentWithOptions("-", "-")
@@ -1304,7 +1335,7 @@ func (i *Instance) SetTmuxSession(session *tmux.TmuxSession) {
 
 // SendKeys sends keys to the tmux session
 func (i *Instance) SendKeys(keys string) error {
-	if !i.started || i.Status == Paused {
+	if !i.Started() || i.status() == Paused {
 		return fmt.Errorf("cannot send keys to instance that has not been started or is paused")
 	}
 	return i.tmuxSession.SendKeys(keys)

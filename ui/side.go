@@ -9,7 +9,9 @@ import (
 	"github.com/AlexanderWeismannn/adroit/session"
 	"github.com/AlexanderWeismannn/adroit/session/ci"
 	"github.com/AlexanderWeismannn/adroit/session/dev"
+	"github.com/AlexanderWeismannn/adroit/session/upstream"
 	"github.com/AlexanderWeismannn/adroit/theme"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // Side is the status column of the wide layout: everything known about the
@@ -132,7 +134,17 @@ func (s *Side) lines() []string {
 	st := i.GetCIStatus()
 	if st.State != ci.StateNoPR && st.PRNumber > 0 {
 		pr := []string{heading("Pull request", "")}
-		plain, styled := ciBadgeAt(st, lipgloss.NoColor{}, badgeWordsAll)
+		// Without the number: the line already leads with it. The words give
+		// way by urgency, as on the row, rather than being cut at the border.
+		lead := fmt.Sprintf("#%d · ", st.PRNumber)
+		badges := rowBadges(st, upstream.Status{})
+		var plain, styled string
+		for _, lv := range badgeLevels[1:] {
+			plain, styled = renderBadges(badges, lipgloss.NoColor{}, false, lv.minRank)
+			if 2+len(lead)+ansi.StringWidth(plain) <= s.width-3 {
+				break
+			}
+		}
 		if plain != "" {
 			pr = append(pr, fact(sideTextStyle.Render(fmt.Sprintf("#%d", st.PRNumber))+" · "+styled))
 		}
@@ -171,14 +183,17 @@ func (s *Side) lines() []string {
 
 	// Agent.
 	agent := []string{heading("Agent", "")}
-	state := "not started"
+	state, stateStyle := "not started", sideMutedStyle
 	switch {
-	case i.Status == session.Paused:
-		state = "checked out"
-	case i.Status == session.Loading:
+	case i.GetStatus() == session.Paused:
+		// The word the legend and the window footer use for the same state.
+		state = "paused"
+	case i.GetStatus() == session.Loading:
 		state = "starting"
 	case i.GetActivity() == session.ActivityNeedsInput:
-		state = "waiting on your answer"
+		// The one state here that is asking you for something: in the colour of
+		// the row's own waiting mark, not muted like the rest of the line.
+		state, stateStyle = "waiting on your answer", ciPendingStyle.Bold(true)
 	case i.GetActivity() == session.ActivityWorking:
 		state = "working"
 	case i.GetActivity() == session.ActivityShell:
@@ -186,8 +201,8 @@ func (s *Side) lines() []string {
 	case i.Started():
 		state = "ready"
 	}
-	line := sideTextStyle.Render(i.Program) + sideMutedStyle.Render(" · "+state)
-	if s.paneRate > 0 && i.Started() && i.Status != session.Paused {
+	line := sideTextStyle.Render(i.Program) + sideMutedStyle.Render(" · ") + stateStyle.Render(state)
+	if Diagnostics && s.paneRate > 0 && i.Started() && i.GetStatus() != session.Paused {
 		line += sideMutedStyle.Render(fmt.Sprintf(" · %g/s", s.paneRate))
 	}
 	agent = append(agent, fact(line))

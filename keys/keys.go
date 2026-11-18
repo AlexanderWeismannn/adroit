@@ -140,9 +140,15 @@ type Binding struct {
 	// "switch tab" while a session is being named).
 	Keys []string
 	// Key is how it is shown; Label what it does, in the menu's words; Help the
-	// same in the help card's, where there is room for a sentence.
-	Key, Label, Help string
-	Group            Group
+	// same in the help card's, where there is room for a sentence. HelpKey,
+	// when set, is how the help card shows the key -- with the aliases the
+	// bar has no room for.
+	//
+	// Notation, everywhere: arrows and enter as glyphs (↑↓ ←→ ↵), other keys
+	// by name (tab, esc, pgup), modifiers joined with + (ctrl+q, shift+↑), and
+	// alternatives separated by a slash (↵/o).
+	Key, Label, Help, HelpKey string
+	Group                     Group
 	// When says whether the key is offered now. Nil means always.
 	When func(Ctx) bool
 	// Dim says whether the key is drawn dim after the actions: present on this
@@ -181,13 +187,16 @@ var Table = []Binding{
 
 	// The jump comes first when it is offered: it is the one entry that says
 	// something about the list rather than the row.
-	{Name: KeyNextAttention, Keys: []string{"]"}, Key: "]", Label: "waiting", Group: GroupSession,
-		Help: "Jump to the next session waiting on you, then the next unseen finish",
+	// "need you" is the header's word for the same set: a question waiting on
+	// your answer, or a finish you have not looked at. "waiting" was the word
+	// for only the first of the two.
+	{Name: KeyNextAttention, Keys: []string{"]"}, Key: "]", Label: "need you", Group: GroupSession,
+		Help: "Jump to the next session that needs you: a question first, then an unseen finish",
 		When: func(c Ctx) bool { return selected(c) && c.Attention }, Lead: always},
 	// Enter does nothing on a paused row (except on the Run tab, where it
 	// attaches to the stack), so it is not offered there: resume is.
-	{Name: KeyEnter, Keys: []string{"enter", "o"}, Key: "↵", Label: "attach", Group: GroupSession,
-		Help: "Attach to the selected session",
+	{Name: KeyEnter, Keys: []string{"enter", "o"}, Key: "↵", HelpKey: "↵/o", Label: "attach", Group: GroupSession,
+		Help: "Attach to the selected session (on the Run tab: to the dev stack)",
 		When: func(c Ctx) bool { return selected(c) && (!c.Paused || c.RunTab) }},
 	{Name: KeySendPrompt, Keys: []string{"i"}, Key: "i", Label: "prompt", Group: GroupSession,
 		Help: "Send a prompt to the selected session without attaching",
@@ -221,6 +230,7 @@ var Table = []Binding{
 	// also the only row that advertises the key that clears it. Ahead-only does
 	// not count -- there is nothing to update FROM, and pushing is p.
 	{Name: KeyUpdate, Keys: []string{"u"}, Key: "u", Label: "update", Group: GroupTools,
+		Help: "Pull the remote's new commits into the session's branch (offered when it is behind)",
 		When: func(c Ctx) bool { return selected(c) && c.CanUpdate },
 		Dim:  func(c Ctx) bool { return selected(c) && !c.NoWorktree && !c.Paused && !c.CanUpdate }},
 	// Offered only for a session whose pull request we know exists, so the menu
@@ -271,7 +281,8 @@ var Table = []Binding{
 		Help: "Settings: agents and their API keys, workspaces, options"},
 	{Name: KeyTheme, Keys: []string{"t"}, Key: "t", Label: "theme", Group: GroupApp,
 		Help: "Change the colour theme (previews as you move)"},
-	{Name: KeyHelp, Keys: []string{"?"}, Key: "?", Label: "help", Group: GroupApp},
+	{Name: KeyHelp, Keys: []string{"?"}, Key: "?", Label: "help", Group: GroupApp,
+		Help: "This card"},
 	{Name: KeyQuit, Keys: []string{"q"}, Key: "q", Label: "quit", Group: GroupApp,
 		Help: "Quit the application"},
 
@@ -279,15 +290,15 @@ var Table = []Binding{
 	// nothing but "enter submit name", which on the prompt overlay is not even
 	// true -- enter submits only from the button, and the branch picker it hides
 	// behind tab was the whole reason the overlay existed.
-	{Name: KeySubmitName, Key: "enter", Label: "submit name", Group: GroupNaming},
+	{Name: KeySubmitName, Key: "↵", Label: "submit name", Group: GroupNaming},
 	{Name: KeyPickBranch, Key: "tab", Label: "pick branch", Group: GroupNaming},
 	{Name: KeyNextField, Key: "tab", Label: "next field", Group: GroupPrompt},
-	{Name: KeyConfirm, Key: "ctrl+s", Label: "submit", Group: GroupPrompt},
+	{Name: KeyConfirm, Key: "ctrl+s", Label: "send", Group: GroupPrompt},
 	{Name: KeyCancel, Key: "esc", Label: "cancel", Group: GroupOverlay},
 
 	// The bar while the window owns the keyboard.
 	{Name: KeyPaneScroll, Key: "↑↓", Label: "scroll", Group: GroupPane},
-	{Name: KeyPanePage, Key: "pgup/dn", Label: "page", Group: GroupPane},
+	{Name: KeyPanePage, Key: "pgup/pgdn", Label: "page", Group: GroupPane},
 	{Name: KeyPaneFollow, Key: "esc", Label: "follow", Group: GroupPane},
 	{Name: KeyPaneTabs, Key: "←→", Label: "tab", Group: GroupPane},
 	{Name: KeyPaneAttach, Key: "↵", Label: "attach", Group: GroupPane},
@@ -392,10 +403,13 @@ func PaneMenu() []KeyName {
 
 // A HelpLine is one row of the help card: a key from the table, named by Name,
 // or a literal pair for the keys the card groups into one row (↑/k and ↓/j) and
-// the ones no binding owns (1-9, ctrl-q to detach).
+// the ones no binding owns (1-9, ctrl+q to detach).
 type HelpLine struct {
 	Name      KeyName
 	Key, Desc string
+	// Covers is the bindings a literal line documents, so a test can tell
+	// that every key the dispatcher answers to is on the card.
+	Covers []KeyName
 }
 
 // Text is the key and the description the line shows: the binding's where it
@@ -405,6 +419,9 @@ func (l HelpLine) Text() (key, desc string) {
 		return l.Key, l.Desc
 	}
 	b := Lookup[l.Name]
+	if b.HelpKey != "" {
+		return b.HelpKey, b.Help
+	}
 	return b.Key, b.Help
 }
 
@@ -425,18 +442,20 @@ var HelpSections = []HelpSection{
 		{Key: "tab", Desc: "At the name prompt: pick an existing branch, or no branch at all"},
 		{Name: KeyKill},
 		{Name: KeyRestore},
-		{Key: "↑/k, ↓/j", Desc: "Navigate between sessions"},
-		{Key: "1-9", Desc: "Select the session with that number"},
+		{Key: "↑/k ↓/j", Desc: "Navigate between sessions", Covers: []KeyName{KeyUp, KeyDown}},
+		// The rows no longer wear numbers; the keys still count down the list.
+		{Key: "1-9", Desc: "Select the first to ninth session in the list"},
 		{Name: KeyNextAttention},
-		{Key: "J/K", Desc: "Reorder sessions"},
+		{Key: "J K", Desc: "Move the selected session down or up the list", Covers: []KeyName{KeyMoveDown, KeyMoveUp}},
 		{Name: KeyEnter},
 		{Name: KeySendPrompt},
-		{Key: "ctrl-q", Desc: "Detach from session"},
+		{Key: "ctrl+q", Desc: "Detach from session"},
 	}},
 	{Title: "Handoff:", Lines: []HelpLine{
 		{Name: KeySubmit},
 		{Name: KeyCheckout},
 		{Name: KeyResume},
+		{Name: KeyUpdate},
 		{Name: KeyOpenPR},
 	}},
 	{Title: "Running the project:", Lines: []HelpLine{
@@ -448,11 +467,12 @@ var HelpSections = []HelpSection{
 		{Name: KeySettings},
 		{Name: KeyTheme},
 		{Name: KeyTab},
-		{Key: "←/h, →/l", Desc: "Switch between preview, diff, terminal and run tabs"},
-		{Key: "<, >", Desc: "Previous or next session, without leaving the window"},
+		{Key: "←/h →/l", Desc: "Switch between the Preview, Diff, Terminal and Run tabs", Covers: []KeyName{KeyLeft, KeyRight}},
+		{Key: "< >", Desc: "Previous or next session, without leaving the window", Covers: []KeyName{KeyPrevSession, KeyNextSession}},
 		{Name: KeyMode},
-		{Key: "shift-↓/↑", Desc: "Scroll in preview/diff/terminal/run view"},
-		{Key: "pgup/pgdn", Desc: "Scroll a page at a time; esc returns to the live view"},
+		{Key: "shift+↑↓", Desc: "Scroll the tab by a line", Covers: []KeyName{KeyShiftUp, KeyShiftDown}},
+		{Key: "pgup/pgdn", Desc: "Scroll the tab by a page; esc returns to the live view", Covers: []KeyName{KeyPageUp, KeyPageDown}},
+		{Name: KeyHelp},
 		{Name: KeyQuit},
 	}},
 }

@@ -6,22 +6,23 @@ import (
 	"strings"
 )
 
-// Default reproduces the colours the interface shipped with, exactly. It is the
-// baseline every other theme is a variation on, and the fallback whenever a
-// configured theme cannot be used, so its values are the literals that were
-// previously spread through the ui packages rather than a fresh approximation.
+// Default reproduces the colours the interface shipped with. It is the baseline
+// every other theme is a variation on, and the fallback whenever a configured
+// theme cannot be used, so its values are the literals that were previously
+// spread through the ui packages -- except where a light-half colour fell below
+// 3:1 against a white terminal, which TestEveryBuiltinIsReadable now catches.
 var Default = Palette{
 	Accent:      {Light: "#874BFD", Dark: "#7D56F4"},
 	AccentText:  {Light: "#FFFFFF", Dark: "#FFFFFF"},
-	Success:     {Light: "#51bd73", Dark: "#51bd73"},
+	Success:     {Light: "#3fa660", Dark: "#51bd73"},
 	Danger:      {Light: "#de613e", Dark: "#de613e"},
 	Warning:     {Light: "#b8860b", Dark: "#e3b341"},
-	Info:        {Light: "#0ea5e9", Dark: "#0ea5e9"},
+	Info:        {Light: "#0d9cdd", Dark: "#0ea5e9"},
 	Special:     {Light: "#8250df", Dark: "#a371f7"},
 	Text:        {Light: "#1a1a1a", Dark: "#dddddd"},
-	Muted:       {Light: "#A49FA5", Dark: "#777777"},
+	Muted:       {Light: "#969197", Dark: "#777777"},
 	Subtle:      {Light: "#DDDADA", Dark: "#3C3C3C"},
-	SelectionBg: {Light: "#dde4f0", Dark: "#2b3040"},
+	SelectionBg: {Light: "#d8e0ee", Dark: "#2b3040"},
 	SelectionFg: {Light: "#1a1a1a", Dark: "#e8eaf0"},
 }
 
@@ -29,32 +30,32 @@ var Default = Palette{
 // theme would inherit the default's hues and look like neither.
 var (
 	dracula = Palette{
-		Accent:      {Light: "#bd93f9", Dark: "#bd93f9"},
+		Accent:      {Light: "#a871f7", Dark: "#bd93f9"},
 		AccentText:  {Light: "#282a36", Dark: "#282a36"},
-		Success:     {Light: "#50fa7b", Dark: "#50fa7b"},
-		Danger:      {Light: "#ff5555", Dark: "#ff5555"},
-		Warning:     {Light: "#f1fa8c", Dark: "#f1fa8c"},
-		Info:        {Light: "#8be9fd", Dark: "#8be9fd"},
-		Special:     {Light: "#ff79c6", Dark: "#ff79c6"},
+		Success:     {Light: "#05a52d", Dark: "#50fa7b"},
+		Danger:      {Light: "#ff4d4d", Dark: "#ff5555"},
+		Warning:     {Light: "#899506", Dark: "#f1fa8c"},
+		Info:        {Light: "#039bbb", Dark: "#8be9fd"},
+		Special:     {Light: "#ff39ab", Dark: "#ff79c6"},
 		Text:        {Light: "#282a36", Dark: "#f8f8f2"},
 		Muted:       {Light: "#6272a4", Dark: "#6272a4"},
 		Subtle:      {Light: "#c8c8d4", Dark: "#44475a"},
-		SelectionBg: {Light: "#e8e4f5", Dark: "#44475a"},
+		SelectionBg: {Light: "#dbd5ef", Dark: "#44475a"},
 		SelectionFg: {Light: "#282a36", Dark: "#f8f8f2"},
 	}
 
 	nord = Palette{
 		Accent:      {Light: "#5e81ac", Dark: "#88c0d0"},
 		AccentText:  {Light: "#eceff4", Dark: "#2e3440"},
-		Success:     {Light: "#a3be8c", Dark: "#a3be8c"},
+		Success:     {Light: "#6f9252", Dark: "#a3be8c"},
 		Danger:      {Light: "#bf616a", Dark: "#bf616a"},
-		Warning:     {Light: "#ebcb8b", Dark: "#ebcb8b"},
-		Info:        {Light: "#81a1c1", Dark: "#81a1c1"},
-		Special:     {Light: "#b48ead", Dark: "#b48ead"},
+		Warning:     {Light: "#af7f1e", Dark: "#ebcb8b"},
+		Info:        {Light: "#648bb3", Dark: "#81a1c1"},
+		Special:     {Light: "#a77a9f", Dark: "#b48ead"},
 		Text:        {Light: "#2e3440", Dark: "#e5e9f0"},
 		Muted:       {Light: "#7b88a1", Dark: "#7b88a1"},
 		Subtle:      {Light: "#d8dee9", Dark: "#434c5e"},
-		SelectionBg: {Light: "#dbe3ee", Dark: "#3b4252"},
+		SelectionBg: {Light: "#c4d1e3", Dark: "#3f4758"},
 		SelectionFg: {Light: "#2e3440", Dark: "#eceff4"},
 	}
 
@@ -69,37 +70,37 @@ var (
 		Text:        {Light: "#3c3836", Dark: "#ebdbb2"},
 		Muted:       {Light: "#7c6f64", Dark: "#a89984"},
 		Subtle:      {Light: "#d5c4a1", Dark: "#504945"},
-		SelectionBg: {Light: "#ebdbb2", Dark: "#3c3836"},
+		SelectionBg: {Light: "#e5d19c", Dark: "#3f3b38"},
 		SelectionFg: {Light: "#3c3836", Dark: "#fbf1c7"},
 	}
 
 	catppuccin = Palette{
 		Accent:      {Light: "#8839ef", Dark: "#cba6f7"},
 		AccentText:  {Light: "#eff1f5", Dark: "#1e1e2e"},
-		Success:     {Light: "#40a02b", Dark: "#a6e3a1"},
+		Success:     {Light: "#3e9c2a", Dark: "#a6e3a1"},
 		Danger:      {Light: "#d20f39", Dark: "#f38ba8"},
-		Warning:     {Light: "#df8e1d", Dark: "#f9e2af"},
-		Info:        {Light: "#209fb5", Dark: "#89dceb"},
-		Special:     {Light: "#ea76cb", Dark: "#f5c2e7"},
+		Warning:     {Light: "#bf7a19", Dark: "#f9e2af"},
+		Info:        {Light: "#1e97ac", Dark: "#89dceb"},
+		Special:     {Light: "#e44cbb", Dark: "#f5c2e7"},
 		Text:        {Light: "#4c4f69", Dark: "#cdd6f4"},
-		Muted:       {Light: "#8c8fa1", Dark: "#9399b2"},
+		Muted:       {Light: "#85889b", Dark: "#9399b2"},
 		Subtle:      {Light: "#ccd0da", Dark: "#45475a"},
-		SelectionBg: {Light: "#e6e9ef", Dark: "#313244"},
+		SelectionBg: {Light: "#cdd3df", Dark: "#313244"},
 		SelectionFg: {Light: "#4c4f69", Dark: "#cdd6f4"},
 	}
 
 	solarized = Palette{
 		Accent:      {Light: "#268bd2", Dark: "#268bd2"},
 		AccentText:  {Light: "#fdf6e3", Dark: "#002b36"},
-		Success:     {Light: "#859900", Dark: "#859900"},
+		Success:     {Light: "#839600", Dark: "#859900"},
 		Danger:      {Light: "#dc322f", Dark: "#dc322f"},
-		Warning:     {Light: "#b58900", Dark: "#b58900"},
-		Info:        {Light: "#2aa198", Dark: "#2aa198"},
+		Warning:     {Light: "#b28700", Dark: "#b58900"},
+		Info:        {Light: "#299d94", Dark: "#2aa198"},
 		Special:     {Light: "#6c71c4", Dark: "#6c71c4"},
 		Text:        {Light: "#073642", Dark: "#eee8d5"},
-		Muted:       {Light: "#93a1a1", Dark: "#839496"},
+		Muted:       {Light: "#809090", Dark: "#839496"},
 		Subtle:      {Light: "#eee8d5", Dark: "#073642"},
-		SelectionBg: {Light: "#eee8d5", Dark: "#073642"},
+		SelectionBg: {Light: "#e2d8b8", Dark: "#084150"},
 		SelectionFg: {Light: "#073642", Dark: "#fdf6e3"},
 	}
 
@@ -118,7 +119,7 @@ var (
 		Text:        {Light: "#003b00", Dark: "#00cc33"},
 		Muted:       {Light: "#4c8f4c", Dark: "#008f11"},
 		Subtle:      {Light: "#bfe0bf", Dark: "#004f0a"},
-		SelectionBg: {Light: "#d6f5d6", Dark: "#012b06"},
+		SelectionBg: {Light: "#b5edb5", Dark: "#012b06"},
 		SelectionFg: {Light: "#003b00", Dark: "#00ff41"},
 	}
 
@@ -134,9 +135,9 @@ var (
 		Info:        {Light: "#2f6db5", Dark: "#8fb5e0"},
 		Special:     {Light: "#7a5cc2", Dark: "#b8a3e8"},
 		Text:        {Light: "#2a2d33", Dark: "#d7dce2"},
-		Muted:       {Light: "#8a8f99", Dark: "#6b7482"},
+		Muted:       {Light: "#878c97", Dark: "#6b7482"},
 		Subtle:      {Light: "#cfcbc2", Dark: "#3a414c"},
-		SelectionBg: {Light: "#e6e2d8", Dark: "#232a35"},
+		SelectionBg: {Light: "#dbd5c7", Dark: "#272f3b"},
 		SelectionFg: {Light: "#2a2d33", Dark: "#e8eaf0"},
 	}
 

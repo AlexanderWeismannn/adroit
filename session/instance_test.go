@@ -458,21 +458,6 @@ func TestDiffStaleness(t *testing.T) {
 	require.True(t, inst.DiffStale(0, false))
 }
 
-// A recompute is what moves the stamp, which is how the diff pane knows it can
-// keep the rendering it already built.
-func TestDiffStatsAtMovesOnlyOnRecompute(t *testing.T) {
-	inst, err := NewInstance(InstanceOptions{Title: "a", Path: ".", Program: "echo"})
-	require.NoError(t, err)
-	require.True(t, inst.DiffStatsAt().IsZero())
-
-	inst.SetDiffStats(&git.DiffStats{Added: 1}, false)
-	first := inst.DiffStatsAt()
-	require.False(t, first.IsZero())
-
-	inst.SetDiffStats(&git.DiffStats{Added: 2}, false)
-	require.True(t, inst.DiffStatsAt().After(first) || inst.DiffStatsAt().Equal(first))
-}
-
 func TestBranchStaleness(t *testing.T) {
 	inst, err := NewInstance(InstanceOptions{Title: "a", Path: ".", Program: "echo"})
 	require.NoError(t, err)
@@ -662,4 +647,37 @@ func TestLaunchWithKeysNamesTheProfileNotTheKey(t *testing.T) {
 
 	require.Equal(t, "claude", withAgentKeys("claude", "claude", cfg), "a profile with no keys launches as before")
 	require.Equal(t, "aider", withAgentKeys("aider", "aider", cfg), "no profile, no wrapper")
+}
+
+// Start runs on a Cmd's goroutine while the interface goes on drawing the row
+// and saving the list, so what it writes -- the session, the status, started --
+// must be readable beside it. Meaningful under -race, which is what catches the
+// unguarded version.
+func TestStartCanBeReadWhileItRuns(t *testing.T) {
+	cmdExec := cmd_test.MockCmdExec{
+		RunFunc:    func(cmd *exec.Cmd) error { return nil },
+		OutputFunc: paneRunning("claude"),
+	}
+	instance, err := NewInstance(InstanceOptions{Title: "read-while-starting", Path: t.TempDir(), Program: "claude"})
+	require.NoError(t, err)
+	instance.SetTmuxSession(tmux.NewTmuxSessionWithDeps("read-while-starting", "claude", &nullPtyFactory{t: t}, cmdExec))
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		require.NoError(t, instance.Start(false))
+	}()
+	for {
+		_ = instance.Started()
+		_ = instance.Paused()
+		_ = instance.DisplayBranch()
+		_ = instance.GetWorktreePath()
+		_ = instance.ToInstanceData()
+		select {
+		case <-done:
+			require.True(t, instance.Started())
+			return
+		default:
+		}
+	}
 }

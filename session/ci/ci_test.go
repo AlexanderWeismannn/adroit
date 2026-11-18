@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/AlexanderWeismannn/adroit/session/upstream"
+
 	"github.com/stretchr/testify/require"
 )
 
@@ -350,9 +352,38 @@ func TestSettledPullRequestsAreRefreshedRarely(t *testing.T) {
 			t.Fatalf("state %v should use the settled ttl", st)
 		}
 	}
-	for _, st := range []State{StateUnknown, StateNoPR, StatePending, StateFailure, StateSuccess} {
+	for _, st := range []State{StateUnknown, StatePending, StateFailure, StateSuccess} {
 		if ttlFor(Status{State: st}) != ttl {
 			t.Fatalf("state %v should use the normal ttl", st)
 		}
 	}
+}
+
+// A branch with no pull request is asked about every few minutes, not every 30
+// seconds -- except that pushing it, the step before a pull request can exist,
+// is noticed on the next tick.
+func TestABranchWithNoPullRequestIsAskedAgainWhenItIsPushed(t *testing.T) {
+	now := time.Now()
+	e := entry{status: Status{State: StateNoPR, FetchedAt: now.Add(-time.Minute)}}
+	require.False(t, e.due("", now), "nothing has changed")
+	require.True(t, e.due("origin/feature", now), "the branch was pushed")
+	require.True(t, e.due("", now.Add(noPRTTL)), "the slow clock still runs")
+
+	live := entry{status: Status{State: StatePending, PRNumber: 7, FetchedAt: now.Add(-time.Minute)}}
+	require.True(t, live.due("origin/feature", now), "a pull request with checks running keeps the fast clock")
+}
+
+// gh is not asked about a branch that cannot have a pull request yet. A merged
+// branch whose remote was deleted has no counterpart either, and must keep its
+// verdict rather than turn into "no pull request".
+func TestALookupIsSkippedOnlyForABranchThatWasNeverPushed(t *testing.T) {
+	measured := time.Now()
+	unpushed := upstream.Status{FetchedAt: measured}
+	pushed := upstream.Status{Ref: "origin/feature", FetchedAt: measured}
+
+	require.True(t, cannotHavePR(Status{}, unpushed))
+	require.True(t, cannotHavePR(Status{State: StateNoPR}, unpushed))
+	require.False(t, cannotHavePR(Status{}, pushed))
+	require.False(t, cannotHavePR(Status{}, upstream.Status{}), "upstream has not measured it yet")
+	require.False(t, cannotHavePR(Status{State: StateMerged, PRNumber: 12}, unpushed), "a merged branch keeps its verdict")
 }

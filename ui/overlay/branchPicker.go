@@ -198,8 +198,9 @@ var (
 			Background(theme.Color(theme.Accent)).
 			Foreground(theme.Color(theme.AccentText))
 
+	// Muted, not Subtle: these are words -- hints, unselected names.
 	bpDimStyle = lipgloss.NewStyle().
-			Foreground(theme.Color(theme.Subtle))
+			Foreground(theme.Color(theme.Muted))
 )
 
 // Render renders the branch picker.
@@ -213,7 +214,7 @@ func (bp *BranchPicker) Render() string {
 	if bp.focused {
 		cursor := bp.filter + "█"
 		s.WriteString(bpFilterStyle.Render(" (filter: " + cursor + ")"))
-		s.WriteString(bpDimStyle.Render("   filter · ↑↓ select · enter choose · ctrl+s start"))
+		s.WriteString(bpDimStyle.Render("   type to filter   ↑↓ select   ↵ choose"))
 	} else {
 		if bp.filter != "" {
 			s.WriteString(bpDimStyle.Render(" (filter: " + bp.filter + ")"))

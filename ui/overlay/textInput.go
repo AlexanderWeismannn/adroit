@@ -18,11 +18,9 @@ var (
 )
 
 var (
-	tiTitleStyle         lipgloss.Style
 	tiButtonStyle        lipgloss.Style
 	tiFocusedButtonStyle lipgloss.Style
 	tiDividerStyle       lipgloss.Style
-	tiHintStyle          lipgloss.Style
 	tiErrorStyle         lipgloss.Style
 )
 
@@ -30,16 +28,11 @@ func init() { theme.OnChange(applyTextInputTheme) }
 
 func applyTextInputTheme() {
 	tiStyle = tiStyle.BorderForeground(theme.Color(theme.Accent))
-	tiTitleStyle = lipgloss.NewStyle().
-		Foreground(theme.Color(theme.Accent)).
-		Bold(true).
-		MarginBottom(1)
 	tiButtonStyle = lipgloss.NewStyle().Foreground(theme.Color(theme.Muted))
 	tiFocusedButtonStyle = lipgloss.NewStyle().
 		Background(theme.Color(theme.Accent)).
 		Foreground(theme.Color(theme.AccentText))
 	tiDividerStyle = lipgloss.NewStyle().Foreground(theme.Color(theme.Subtle))
-	tiHintStyle = lipgloss.NewStyle().Foreground(theme.Color(theme.Subtle))
 	tiErrorStyle = lipgloss.NewStyle().Foreground(theme.Color(theme.Danger))
 }
 
@@ -443,18 +436,20 @@ func (t *TextInputOverlay) render() string {
 		content += tiErrorStyle.Render("✗ "+t.errMsg) + "\n\n"
 	}
 
-	// Render enter button with appropriate style
-	enterButton := " Enter "
+	// The button names what it does, not a key: it said "Enter", while ↵ in
+	// the prompt -- the field you are in -- inserts a line break. ↵ presses it
+	// once tab has reached it, and ctrl+s sends from any field.
+	button := " Send "
 	if t.isEnterButton() {
-		enterButton = tiFocusedButtonStyle.Render(enterButton)
+		button = tiFocusedButtonStyle.Render(button) + tiButtonStyle.Render("  ↵ to send")
 	} else {
-		enterButton = tiButtonStyle.Render(enterButton)
+		button = tiButtonStyle.Render(button)
 	}
-	content += enterButton
+	content += button
 
-	footer := Keys(Key{"ctrl+s", "submit"}, Key{"esc", "cancel"})
+	footer := Keys(Key{"ctrl+s", "send"}, Key{"esc", "cancel"})
 	if t.numStops > 2 {
-		footer = Keys(Key{"tab", "next field"}, Key{"ctrl+s", "submit"}, Key{"esc", "cancel"})
+		footer = Keys(Key{"ctrl+s", "send"}, Key{"tab", "next field"}, Key{"esc", "cancel"})
 	}
 	return Frame(t.width, t.Title, content, footer, theme.Color(theme.Accent))
 }

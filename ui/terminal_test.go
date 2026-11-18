@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -165,7 +166,7 @@ func TestTerminalFallbackStates(t *testing.T) {
 
 		tp.mu.Lock()
 		require.True(t, tp.fallback, "should be in fallback mode for nil instance")
-		require.Contains(t, tp.fallbackText, "Select an instance", "fallback text should prompt to select instance")
+		require.Contains(t, tp.fallbackText, "Select a session", "fallback text should prompt to select a session")
 		require.Empty(t, tp.content, "content should be empty in fallback mode")
 		tp.mu.Unlock()
 	})
@@ -424,4 +425,46 @@ func TestTerminalKeepsTheTopLineOfAFullHeightCapture(t *testing.T) {
 	require.Contains(t, rendered, "row-1", "the first row of the capture must survive")
 	require.Contains(t, rendered, "row-5")
 	require.Len(t, strings.Split(rendered, "\n"), height)
+}
+
+// The Terminal tab is updated on the event loop, on every move of the cursor.
+// Its first visit to a session started the shell right there -- has-session,
+// new-session and a wait of up to two seconds for it to come up -- so the whole
+// interface froze for that long. The shell is now opened off the loop, the pane
+// saying so meanwhile, and a close while it opens closes what it made.
+func TestTerminalOpensItsShellOffTheLoop(t *testing.T) {
+	log.Initialize(false)
+	defer log.Close()
+	dir, err := os.MkdirTemp("/tmp", "utmx")
+	require.NoError(t, err)
+	t.Setenv("TMUX_TMPDIR", dir)
+	t.Setenv("TMUX", "")
+	t.Cleanup(func() {
+		_ = exec.Command("tmux", "kill-server").Run()
+		_ = os.RemoveAll(dir)
+	})
+
+	instance := makeStartedInstance(t, "opens")
+	defer func() { _ = instance.Kill() }()
+	tp := NewTerminalPane()
+	tp.SetSize(80, 30)
+
+	require.NoError(t, tp.UpdateContent(instance))
+	tp.mu.Lock()
+	_, opened := tp.sessions[instance.Title]
+	fallback := tp.fallbackText
+	tp.mu.Unlock()
+	require.False(t, opened, "the shell was started on the caller's goroutine")
+	require.Contains(t, fallback, "Opening a terminal")
+
+	require.Eventually(t, func() bool {
+		_, ok, err := tp.Sample(instance)
+		return ok && err == nil
+	}, 10*time.Second, 50*time.Millisecond, "the shell never came up for the pane tick to sample")
+
+	tp.CloseForInstance(instance.Title)
+	name := tmux.SessionNameFor(TerminalSessionName(instance.Title))
+	require.Eventually(t, func() bool {
+		return exec.Command("tmux", "has-session", "-t", "="+name).Run() != nil
+	}, 10*time.Second, 50*time.Millisecond, "closing the instance must kill its shell")
 }

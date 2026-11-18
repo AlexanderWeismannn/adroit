@@ -69,6 +69,12 @@ func Frame(width int, title, body, footer string, border color.Color) string {
 	return strings.Join(rows, "\n")
 }
 
+// FrameChrome is how many rows a frame of this width and footer takes around
+// its body: the borders, the air above and below, and the keys line as wrapped.
+func FrameChrome(width int, footer string) int {
+	return strings.Count(Frame(width, "", "", footer, theme.Color(theme.Muted)), "\n")
+}
+
 // A Key is one entry of a frame's footer: the key and what it does here.
 type Key struct {
 	Key, Label string

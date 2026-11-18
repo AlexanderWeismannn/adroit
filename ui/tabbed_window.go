@@ -216,7 +216,11 @@ func (w *TabbedWindow) SetSize(width, height int) {
 	// takes, and a negative budget reached the panes: the preview sliced with it
 	// and panicked on the first frame. Nothing is left to draw, so draw nothing.
 	contentHeight := max(height-tabBarHeight-footerHeight-windowStyle.GetVerticalFrameSize(), 0)
-	contentWidth := max(w.width-windowStyle.GetHorizontalFrameSize(), 0)
+	// w.width is already the inside of the side borders, which is the width
+	// String places the content in. Taking the frame off it a second time left
+	// every pane two columns narrower than its box: the preview's lines and
+	// rules were cut with "…" beside two blank columns.
+	contentWidth := w.width
 
 	w.preview.SetSize(contentWidth, contentHeight)
 	w.diff.SetSize(contentWidth, contentHeight)
@@ -531,7 +535,7 @@ func (w *TabbedWindow) diffSummary() string {
 }
 
 // SetPaneRate records how often the live pane is being sampled, which the
-// footer shows beside "live": the number says the pane is moving.
+// footer shows beside "live" while profiling (see Diagnostics).
 func (w *TabbedWindow) SetPaneRate(perSecond float64) {
 	w.paneRate = perSecond
 }
@@ -546,7 +550,7 @@ func (w *TabbedWindow) SetPaneRate(perSecond float64) {
 // way to tell was to wait and see whether anything moved.
 func (w *TabbedWindow) paneStatus() (text string, style lipgloss.Style) {
 	live := func() (string, lipgloss.Style) {
-		if w.paneRate > 0 {
+		if Diagnostics && w.paneRate > 0 {
 			return fmt.Sprintf("● live · %g/s", w.paneRate), footerLiveStyle
 		}
 		return "● live", footerLiveStyle
@@ -558,26 +562,29 @@ func (w *TabbedWindow) paneStatus() (text string, style lipgloss.Style) {
 		if w.instance == nil || w.preview.isScrolling || !w.instance.Started() {
 			return "", tabLabelStyle
 		}
-		if w.instance.Status == session.Paused {
-			return "⏸ paused · r resumes", footerPausedStyle
+		// The list's own paused mark. It was ⏸ (U+23F8), and ↕ marked a scrolled
+		// pane: both carry an emoji presentation, which Windows Terminal can draw
+		// two cells wide while the width accounting counts one.
+		if w.instance.GetStatus() == session.Paused {
+			return "○ paused · r resumes", footerPausedStyle
 		}
 		return live()
 	case DiffTab:
 		summary := w.diffSummary()
 		if w.diff.IsScrolling() {
-			return strings.TrimSpace("↕ scrolled · " + summary), tabLabelStyle
+			return strings.TrimSpace("scrolled · " + summary), tabLabelStyle
 		}
 		return summary, tabLabelStyle
 	case TerminalTab:
 		if w.terminal.IsScrolling() {
-			return "↕ scrolled", tabLabelStyle
+			return "scrolled", tabLabelStyle
 		}
-		if w.instance != nil && w.instance.Started() && w.instance.Status != session.Paused {
+		if w.instance != nil && w.instance.Started() && w.instance.GetStatus() != session.Paused {
 			return live()
 		}
 	case RunTab:
 		if w.run.IsScrolling() {
-			return "↕ scrolled", tabLabelStyle
+			return "scrolled", tabLabelStyle
 		}
 		if w.run.running() {
 			return live()

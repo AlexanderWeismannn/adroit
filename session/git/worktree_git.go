@@ -137,22 +137,16 @@ func (g *GitWorktree) PushChanges(commitMessage string, open bool) error {
 	}
 
 	// First push the branch to remote to ensure it exists
-	pushCmd := exec.Command("gh", "repo", "sync", "--source", "-b", g.branchName)
-	pushCmd.Dir = g.worktreePath
-	if err := pushCmd.Run(); err != nil {
+	if _, err := g.runPushCommand("gh", "repo", "sync", "--source", "-b", g.branchName); err != nil {
 		// If sync fails, try creating the branch on remote first
-		gitPushCmd := exec.Command("git", "push", "-u", "origin", g.branchName)
-		gitPushCmd.Dir = g.worktreePath
-		if pushOutput, pushErr := gitPushCmd.CombinedOutput(); pushErr != nil {
+		if pushOutput, pushErr := g.runPushCommand("git", "push", "-u", "origin", g.branchName); pushErr != nil {
 			log.ErrorLog.Print(pushErr)
 			return fmt.Errorf("failed to push branch: %s (%w)", pushOutput, pushErr)
 		}
 	}
 
 	// Now sync with remote
-	syncCmd := exec.Command("gh", "repo", "sync", "-b", g.branchName)
-	syncCmd.Dir = g.worktreePath
-	if output, err := syncCmd.CombinedOutput(); err != nil {
+	if output, err := g.runPushCommand("gh", "repo", "sync", "-b", g.branchName); err != nil {
 		log.ErrorLog.Print(err)
 		return fmt.Errorf("failed to sync changes: %s (%w)", output, err)
 	}
@@ -166,6 +160,31 @@ func (g *GitWorktree) PushChanges(commitMessage string, open bool) error {
 	}
 
 	return nil
+}
+
+// pushTimeout bounds each network step of a push.
+const pushTimeout = 2 * time.Minute
+
+// runPushCommand runs one network step of a push -- gh or git -- in the
+// worktree, where it cannot ask anything of the terminal and cannot run
+// forever.
+//
+// These ran as plain children with neither. An expired token or a locked ssh key
+// then prompted on /dev/tty, over the interface, splitting the keystrokes
+// between the prompt and Adroit; and a push stuck on the network held the
+// confirmed action with nothing on screen to say so. A push that needs a human
+// now fails and says why: the user can push from a shell, where they can answer.
+func (g *GitWorktree) runPushCommand(name string, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), pushTimeout)
+	defer cancel()
+	c := cmd.Detach(cmd.NonInteractiveGit(exec.CommandContext(ctx, name, args...)))
+	c.Env = append(c.Env, "GH_PROMPT_DISABLED=1")
+	c.Dir = g.worktreePath
+	out, err := c.CombinedOutput()
+	if ctx.Err() == context.DeadlineExceeded {
+		return out, fmt.Errorf("%s %s timed out after %s", name, strings.Join(args, " "), pushTimeout)
+	}
+	return out, err
 }
 
 // CommitChanges commits changes locally without pushing to remote

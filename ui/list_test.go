@@ -360,7 +360,7 @@ func TestDiffStatsAreSpaceSeparated(t *testing.T) {
 	inst.SetDiffStats(&git.DiffStats{Added: 2200, Removed: 12}, false)
 
 	line := plain(branchLineOf(t, r.Render(inst, 1, false, false, false)))
-	require.Contains(t, line, "+2.2k -12")
+	require.Contains(t, line, "+2.2k −12")
 	require.NotContains(t, line, "+2.2k,-12")
 }
 
@@ -383,16 +383,40 @@ func TestBranchGlyphIsNotFollowedByAHyphen(t *testing.T) {
 // badge simply goes unexplained — so assert every glyph the list can draw is in
 // it. Add the glyph to BadgeLegend when this fails; do not delete the case.
 func TestBadgeLegendCoversEveryGlyph(t *testing.T) {
-	legend := strings.Join(BadgeLegend(), "\n")
+	legend := strings.Join(BadgeLegend(0), "\n")
 
 	for _, icon := range []string{
-		strings.TrimSpace(readyIcon), strings.TrimSpace(pausedIcon),
+		strings.TrimSpace(readyIcon), strings.TrimSpace(pausedIcon), strings.TrimSpace(notStartedIcon),
+		strings.TrimSpace(unseenIcon), strings.TrimSpace(needsInputChip), shellLegendFrame,
 		spinnerLegendFrame, strings.TrimSpace(doneChip),
 		ciSuccessIcon, ciFailureIcon, ciPendingIcon, ciMergedIcon, ciClosedIcon, ciNoPRIcon,
 		ciConflictIcon, ciChangesIcon, ciApprovedIcon,
 		upstreamBehindIcon, upstreamAheadIcon, ciCommentIcon,
 	} {
 		require.Contains(t, legend, icon, "glyph %q is drawn in the list but absent from the legend", icon)
+	}
+}
+
+// One glyph, one meaning. ✓ was a passing build and a finish you had not seen;
+// ✗ a failed build and a dev stack that is down -- on the same row, a line
+// apart. Every mark a row can carry must be its own shape.
+func TestEveryRowGlyphMeansOneThing(t *testing.T) {
+	marks := map[string]string{
+		"ready": readyIcon, "paused": pausedIcon, "not started": notStartedIcon, "just finished": doneChip,
+		"needs input": needsInputChip, "unseen": unseenIcon, "agent working": spinnerLegendFrame,
+		"shell running": shellLegendFrame, "CI passed": ciSuccessIcon, "CI failed": ciFailureIcon,
+		"CI running": ciPendingIcon, "merged": ciMergedIcon, "closed": ciClosedIcon, "no PR": ciNoPRIcon,
+		"conflict": ciConflictIcon, "changes": ciChangesIcon, "approved": ciApprovedIcon, "comments": ciCommentIcon,
+		"behind": upstreamBehindIcon, "ahead": upstreamAheadIcon, "stack up": lampUpGlyph,
+		"stack starting": lampPendingGlyph, "stack down": lampDownGlyph, "branch": branchIcon, "repo": repoIcon,
+	}
+	seen := map[string]string{}
+	for meaning, glyph := range marks {
+		glyph = strings.TrimSpace(glyph)
+		if other, dup := seen[glyph]; dup {
+			t.Errorf("%q means both %q and %q", glyph, other, meaning)
+		}
+		seen[glyph] = meaning
 	}
 }
 
@@ -409,6 +433,20 @@ func TestListHeaderShowsTheSessionCount(t *testing.T) {
 	l.AddInstance(inst)
 	require.Contains(t, l.String(), "Sessions")
 	require.Contains(t, l.String(), "1/1", "the selection's place in the bottom border")
+}
+
+// The header was cut from the right, so on a narrow terminal with a long branch
+// the count of sessions that need you was the first thing lost. The place gives
+// way first now, and the count survives at every width it can fit in.
+func TestHeaderKeepsTheNeedYouCountWhenNarrow(t *testing.T) {
+	for _, width := range []int{50, 62, 70, 80, 100} {
+		h := NewHeader()
+		h.SetWidth(width)
+		h.Repo, h.Base, h.Mode, h.Sessions, h.NeedYou = "~/projects/webapp", "feature/a-rather-long-branch-name", "compact", 15, 2
+		line := plain(h.String())
+		require.Contains(t, line, "2 need you", "width %d: %q", width, line)
+		require.LessOrEqual(t, lipgloss.Width(line), width)
+	}
 }
 
 // The line means something different for a session with no branch: a directory,
@@ -581,19 +619,40 @@ func TestTheSelectedSessionIsAlwaysVisible(t *testing.T) {
 // to be the whole of itself.
 func TestHiddenSessionsAreCounted(t *testing.T) {
 	l := listOfSize(t, 12, 50, 24)
-	l.SetSelectedInstance(6)
+	l.SetSelectedInstance(8)
 	rendered := plain(l.String())
 
-	require.Regexp(t, `↑ \d+ more`, rendered, "sessions above the window must be counted")
-	require.Regexp(t, `↓ \d+ more`, rendered, "sessions below the window must be counted")
+	require.Regexp(t, `\d+ more above`, rendered, "sessions above the window must be counted")
+	require.Regexp(t, `\d+ more below`, rendered, "sessions below the window must be counted")
 
 	// The two counts plus what is drawn must be the whole list.
-	above := regexp.MustCompile(`↑ (\d+) more`).FindStringSubmatch(rendered)
-	below := regexp.MustCompile(`↓ (\d+) more`).FindStringSubmatch(rendered)
+	above := regexp.MustCompile(`(\d+) more above`).FindStringSubmatch(rendered)
+	below := regexp.MustCompile(`(\d+) more below`).FindStringSubmatch(rendered)
 	drawn := strings.Count(rendered, "-a-session")
 	a, _ := strconv.Atoi(above[1])
 	b, _ := strconv.Atoi(below[1])
 	require.Equal(t, 12, a+b+drawn, "counted %d above + %d below + %d drawn", a, b, drawn)
+
+	// "↓ 9 more" hid that one of the nine was stopped on a question for you.
+	l.GetInstances()[11].SetStatus(session.Ready)
+	l.GetInstances()[11].SetActivity(session.ActivityNeedsInput, 0)
+	l.SetSelectedInstance(0)
+	require.Regexp(t, `more below · 1 needs you`, plain(l.String()), "a hidden session waiting on you is not counted on the marker")
+}
+
+// The blank row that separates sessions is not drawn under the last one, and a
+// list scrolled to its top shows one marker, not two: a pane with room left for
+// another whole session must draw it rather than leave the rows blank.
+func TestAScrolledListLeavesNoRoomForAnotherSession(t *testing.T) {
+	for _, height := range []int{30, 24, 20} {
+		l := listOfSize(t, 12, 50, height)
+		rows := strings.Split(plain(l.String()), "\n")
+		blank := 0
+		for i := len(rows) - 2; i > 0 && strings.TrimSpace(strings.Trim(rows[i], "│")) == ""; i-- {
+			blank++
+		}
+		require.Less(t, blank, 3, "height %d: %d blank rows under the marker, room for another session", height, blank)
+	}
 }
 
 // A list that fits must not be scrolled, or it would give up two rows and hide
@@ -790,7 +849,8 @@ func TestShellStillRunningDoesNotLookFinished(t *testing.T) {
 	out := r.Render(inst, 1, false, false, false)
 	require.NotContains(t, out, strings.TrimSpace(readyIcon),
 		"a session with a shell still running rendered the ready dot")
-	require.Contains(t, out, r.spinner.View(), "the row should still be animating")
+	require.Contains(t, out, r.shellFrame(), "the row should still be animating")
+	require.NotContains(t, out, r.spinner.View(), "the shell must not wear the agent's own spinner")
 }
 
 // The chip is what makes a finish visible to someone who was reading another
@@ -977,15 +1037,15 @@ func TestTheBranchGlyphGoesWithItsName(t *testing.T) {
 	// them sideways on whichever rows happened to have an echoed branch.
 	require.Equal(t, lipgloss.Width(named), lipgloss.Width(echoed))
 
-	// The badges follow the branch, so on the echoed row they start where the
-	// branch would have: the glyph's column stays spent, and nothing else.
+	// The stats are right-aligned in their own column, so they line up on both
+	// rows whatever the branch line holds.
 	columnOf := func(t *testing.T, out, needle string) int {
 		t.Helper()
 		line := lineContaining(t, plain(out), needle)
 		return ansi.StringWidth(line[:strings.Index(line, needle)])
 	}
-	require.Equal(t, columnOf(t, named, branchIcon), columnOf(t, echoed, "+6.5k")-3,
-		"with no branch the stats take its place, one glyph and a space in")
+	require.Equal(t, columnOf(t, named, "+6.5k"), columnOf(t, echoed, "+6.5k"),
+		"the stats sit in the same column with or without a branch name")
 }
 
 // The badge is a notification, so it has to be silent in every state that asks
@@ -1265,8 +1325,8 @@ func TestBadgesSpellThemselvesOutWhenThereIsRoom(t *testing.T) {
 	narrow.setWidth(44)
 	line = plain(branchLineOf(t, narrow.Render(inst, 1, false, false, false)))
 	require.Contains(t, line, "feature", "the branch name outranks the words")
-	require.Contains(t, line, ciFailureIcon+" #4559", "the marks themselves stay")
-	require.NotContains(t, line, "failed")
+	require.Contains(t, line, ciFailureIcon+" failed", "the most urgent words are the last to go")
+	require.NotContains(t, line, "#4559", "the number goes before any word")
 	require.NotContains(t, line, "diverged")
 }
 
@@ -1395,18 +1455,37 @@ func TestMergedSessionIsNotReadyForYou(t *testing.T) {
 	require.Contains(t, r.Render(inst, 1, false, false, false), strings.TrimSpace(readyIcon))
 }
 
-// Words give way one at a time, least useful first.
-func TestBadgeWordsGiveWayOneAtATime(t *testing.T) {
-	status := ci.Status{State: ci.StateSuccess, PRNumber: 4773, Review: ci.ReviewApproved, Feedback: ci.FeedbackOutstanding}
-	all, _ := ciBadgeAt(status, lipgloss.NoColor{}, badgeWordsAll)
-	review, _ := ciBadgeAt(status, lipgloss.NoColor{}, badgeWordsReview)
-	verdict, _ := ciBadgeAt(status, lipgloss.NoColor{}, badgeWordsVerdict)
-	require.Contains(t, all, "comments")
-	require.NotContains(t, review, "comments")
-	require.Contains(t, review, "approved")
-	require.NotContains(t, verdict, "approved")
-	require.Contains(t, verdict, "passed")
-	require.Less(t, len(verdict), len(review))
+// Words go by urgency. They used to give way in a fixed order, verdict last, so
+// in the 34 columns a split list's row gets, the row with a failed build and
+// changes requested lost every word ("↓3 ✗ #5503 ✎ ❞") while a passing row kept
+// "passed". The number goes first now, then the calm words; "failed" and
+// "changes" are the last to go, and outlast the row's diff stat.
+func TestBadgeWordsGoByUrgency(t *testing.T) {
+	urgent := ci.Status{State: ci.StateFailure, PRNumber: 5503, Review: ci.ReviewChangesRequested, Feedback: ci.FeedbackOutstanding}
+	r, inst := newTestRenderer(t, 34, "x", urgent)
+	inst.Title = "TASK-6572-ews"
+	inst.Branch = "TASK-6572-ews"
+	inst.SetUpstreamStatus(upstream.Status{Ref: "origin/x", Behind: 3, FetchedAt: time.Now()})
+	inst.SetDiffStats(&git.DiffStats{Added: 412, Removed: 98, Content: "x"}, true)
+	line := plain(strings.Split(r.Render(inst, 1, false, false, false), "\n")[1])
+	require.Contains(t, line, "failed", "%q", line)
+	require.Contains(t, line, "changes", "%q", line)
+	require.NotContains(t, line, "#5503", "the number goes before any word: %q", line)
+
+	// With room for everything, nothing is dropped.
+	r.setWidth(100)
+	line = plain(strings.Split(r.Render(inst, 1, false, false, false), "\n")[1])
+	for _, want := range []string{"behind", "#5503", "failed", "changes", "comments", "+412"} {
+		require.Contains(t, line, want, "%q", line)
+	}
+}
+
+// A row with no change has no stat: "+0 −0" on every quiet row was noise in
+// the column the eye runs down for change.
+func TestAnEmptyDiffShowsNoStat(t *testing.T) {
+	r, inst := newTestRenderer(t, 60, "TASK-1", ci.Status{})
+	inst.SetDiffStats(&git.DiffStats{Content: "x"}, true)
+	require.NotContains(t, plain(r.Render(inst, 1, false, false, false)), "+0")
 }
 
 // An action in flight -- a checkout, a resume -- is shown on the row from the

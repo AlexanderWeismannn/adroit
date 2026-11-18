@@ -144,10 +144,47 @@ var (
 			log.Initialize(false)
 			defer log.Close()
 
+			// A running Adroit would go on driving the sessions this tears down, and
+			// save its list over the emptied one when it quit. Same lock, same
+			// refusal as a second launch.
+			lock, holder, err := config.AcquireInstanceLock()
+			if err != nil {
+				return err
+			}
+			if lock == nil {
+				return fmt.Errorf("%s is running (%s): quit it before resetting", binName,
+					config.DescribeLockHolder(holder))
+			}
+			defer func() {
+				if err := lock.Release(); err != nil {
+					log.WarningLog.Printf("could not release the instance lock: %v", err)
+				}
+			}()
+
 			state := config.LoadState()
 			storage, err := session.NewStorage(state)
 			if err != nil {
 				return fmt.Errorf("failed to initialize storage: %w", err)
+			}
+			// Read before the storage goes: which worktrees are Adroit's, in which
+			// repository, and which branches it created rather than adopted.
+			var records []session.InstanceData
+			if raw := state.GetInstances(); len(raw) > 0 {
+				if err := json.Unmarshal(raw, &records); err != nil {
+					return fmt.Errorf("could not read the stored sessions, so nothing was reset: %w", err)
+				}
+			}
+			var owned []git.ManagedWorktree
+			for _, r := range records {
+				if r.NoWorktree {
+					continue
+				}
+				owned = append(owned, git.ManagedWorktree{
+					RepoPath:         r.Worktree.RepoPath,
+					WorktreePath:     r.Worktree.WorktreePath,
+					BranchName:       r.Worktree.BranchName,
+					IsExistingBranch: r.Worktree.IsExistingBranch,
+				})
 			}
 			if err := storage.DeleteAllInstances(); err != nil {
 				return fmt.Errorf("failed to reset storage: %w", err)
@@ -159,7 +196,7 @@ var (
 			}
 			fmt.Println("Tmux sessions have been cleaned up")
 
-			if err := git.CleanupWorktrees(); err != nil {
+			if err := git.CleanupWorktrees(owned); err != nil {
 				return fmt.Errorf("failed to cleanup worktrees: %w", err)
 			}
 			fmt.Println("Worktrees have been cleaned up")

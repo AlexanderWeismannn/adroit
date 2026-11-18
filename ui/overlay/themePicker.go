@@ -150,7 +150,7 @@ func (t *ThemePicker) Render() string {
 	}
 
 	return Frame(lipgloss.Width(body.String())+6, "Theme",
-		body.String(), Keys(Key{"↑↓", "preview"}, Key{"enter", "keep"}, Key{"esc", "cancel"}), theme.Color(theme.Accent))
+		body.String(), Keys(Key{"↑↓", "preview"}, Key{"↵", "keep"}, Key{"esc", "cancel"}), theme.Color(theme.Accent))
 }
 
 func padRight(s string, width int) string {
@@ -158,25 +158,4 @@ func padRight(s string, width int) string {
 		return s
 	}
 	return s + strings.Repeat(" ", width-len(s))
-}
-
-var (
-	themeBorderStyle lipgloss.Style
-	themeTitleStyle  lipgloss.Style
-	themeHintStyle   lipgloss.Style
-)
-
-func init() { theme.OnChange(applyThemePickerTheme) }
-
-// The picker's own chrome follows the theme being previewed, so choosing one
-// shows what its accent and border will actually look like.
-func applyThemePickerTheme() {
-	themeBorderStyle = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(theme.Color(theme.Accent)).
-		Padding(1, 2)
-	themeTitleStyle = lipgloss.NewStyle().
-		Foreground(theme.Color(theme.Accent)).
-		Bold(true)
-	themeHintStyle = lipgloss.NewStyle().Foreground(theme.Color(theme.Subtle))
 }

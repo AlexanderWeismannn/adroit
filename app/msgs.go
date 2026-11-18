@@ -46,10 +46,9 @@ type killFinishedMsg struct {
 type instanceChangedMsg struct{}
 
 type instanceStartedMsg struct {
-	instance        *session.Instance
-	err             error
-	promptAfterName bool
-	selectedBranch  string
+	instance       *session.Instance
+	err            error
+	selectedBranch string
 }
 
 // branchSearchDebounceMsg fires after the debounce interval to trigger a search.

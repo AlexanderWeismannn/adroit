@@ -50,7 +50,9 @@ func applyRunTheme() {
 const (
 	lampUpGlyph      = "▸"
 	lampPendingGlyph = "▹"
-	lampDownGlyph    = "✗"
+	// A stop square, not the ✗ it was: that is a failed build on the row's
+	// branch line, one line below the row's dev-stack mark.
+	lampDownGlyph = "■"
 )
 
 // RunPane renders the singleton dev stack: its readiness lamps and the output of

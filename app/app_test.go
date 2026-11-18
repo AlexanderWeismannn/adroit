@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/AlexanderWeismannn/adroit/config"
+	"github.com/AlexanderWeismannn/adroit/keys"
 	"github.com/AlexanderWeismannn/adroit/log"
 	"github.com/AlexanderWeismannn/adroit/session"
 	"github.com/AlexanderWeismannn/adroit/session/ci"
@@ -942,6 +943,40 @@ func TestKilledSessionIsRecordedWithItsConversation(t *testing.T) {
 	assert.Equal(t, "TASK-9", restored.Title)
 }
 
+// Sessions that run in the repository itself share one directory, and so one
+// folder of transcripts. The record took the newest transcript in it, so killing
+// one of them recorded whichever conversation had last been written -- often
+// another session's -- and R restored that one. A session that knows its own
+// conversation is recorded with it.
+func TestAKilledSessionIsRecordedWithItsOwnConversationNotTheNewest(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	workdir := t.TempDir()
+	projectDir, err := resume.ProjectDir(workdir)
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(projectDir, 0o755))
+	write := func(id, said string, at time.Time) {
+		path := filepath.Join(projectDir, id+".jsonl")
+		require.NoError(t, os.WriteFile(path, []byte(`{"type":"user","sessionId":"`+id+`","cwd":"`+workdir+
+			`","message":{"role":"user","content":"`+said+`"}}`+"\n"), 0o644))
+		require.NoError(t, os.Chtimes(path, at, at))
+	}
+	write("mine", "fix the importer", time.Now().Add(-time.Hour))
+	write("theirs", "something else entirely", time.Now())
+
+	instance, err := session.FromInstanceData(session.InstanceData{
+		Title: "repo", Path: workdir, Status: session.Paused, NoWorktree: true,
+		Program: "claude", SessionID: "mine"})
+	require.NoError(t, err)
+	state := &fakeAppState{}
+	h := newDevStackHome(t, dev.New(nil), state)
+
+	h.recordKilledSession(instance)
+
+	require.Len(t, state.killed, 1)
+	assert.Equal(t, "mine", state.killed[0].SessionID)
+	assert.Equal(t, "fix the importer", state.killed[0].Summary)
+}
+
 // Two sessions cannot share a title: it names the tmux session and the branch,
 // so tmux refuses the second one outright.
 func TestRestoringTwiceGivesTheSecondSessionItsOwnName(t *testing.T) {
@@ -1190,7 +1225,7 @@ func TestNewThenTabShowsTheWholeBranchPicker(t *testing.T) {
 		view := h.view()
 		require.Len(t, strings.Split(view, "\n"), size[1], "%dx%d", size[0], size[1])
 		require.Contains(t, view, "No branch (run in the repo itself)", "%dx%d", size[0], size[1])
-		require.Contains(t, view, " Enter ", "%dx%d: the submit button must be on screen", size[0], size[1])
+		require.Contains(t, view, " Send ", "%dx%d: the submit button must be on screen", size[0], size[1])
 	}
 }
 
@@ -1202,4 +1237,153 @@ func keyText(s string) tea.KeyPressMsg {
 		return tea.KeyPressMsg{}
 	}
 	return tea.KeyPressMsg{Code: r[0], Text: s}
+}
+
+// The keys the menu offers for the selected session must follow what the
+// metadata tick learns about it, without the cursor having to move. The menu
+// reads the session once, when it is told to; it used to be told only on a
+// selection change or when the pane's content changed, so a session that had
+// gone still kept `g open PR` dim after its pull request appeared until you
+// moved off the row and back.
+func TestMetadataTickRefreshesTheSelectedSessionsKeys(t *testing.T) {
+	instance, err := session.FromInstanceData(session.InstanceData{
+		Title: "menu-follows-tick-test", Path: t.TempDir(), Status: session.Paused, Program: "claude",
+		// A branch of its own: on a repo session the key is hidden, not dimmed.
+		Worktree: session.GitWorktreeData{RepoPath: t.TempDir(), WorktreePath: t.TempDir(),
+			BranchName: "menu-follows-tick"}})
+	require.NoError(t, err)
+	// Built paused so no tmux session is needed, then made live: the tick skips
+	// paused sessions.
+	instance.Status = session.Ready
+
+	h := newDevStackHome(t, dev.New(nil), &fakeAppState{})
+	_ = h.list.AddInstance(instance)
+	h.list.SetSelectedInstance(0)
+	h.syncSelection()
+	require.Contains(t, h.menu.Dimmed(), keys.KeyOpenPR, "no pull request yet, so the key starts dim")
+
+	// The pane is unchanged (zero PaneState), which is the case that went stale.
+	_, _ = h.Update(metadataUpdateDoneMsg{results: []instanceMetaResult{{
+		instance: instance,
+		ciStatus: ci.Status{State: ci.StatePending, PRNumber: 42},
+	}}})
+
+	require.NotContains(t, h.menu.Dimmed(), keys.KeyOpenPR,
+		"the tick found a pull request; the menu still offers the key as dim")
+}
+
+// A session finishing its start while the next one is being named must not take
+// the cursor. Esc and ctrl+c abandon the session being named, and they used to
+// do it by killing the selected row -- which the start had just moved to the
+// session that started, so its worktree and branch went instead. The prompt
+// overlay of N had the same fault: its submit and its cancel read the cursor.
+func TestAStartFinishingWhileNamingLeavesTheNewSessionAlone(t *testing.T) {
+	dir, err := os.MkdirTemp("/tmp", "atmx")
+	require.NoError(t, err)
+	t.Setenv("TMUX_TMPDIR", dir)
+	t.Setenv("TMUX", "")
+	t.Cleanup(func() {
+		_ = exec.Command("tmux", "kill-server").Run()
+		_ = os.RemoveAll(dir)
+	})
+
+	for _, tc := range []struct {
+		name string
+		// open starts naming a new session, and abandon gives it up.
+		open, abandon []tea.KeyPressMsg
+	}{
+		{"esc while naming", []tea.KeyPressMsg{keyText("n"), keyText("b")},
+			[]tea.KeyPressMsg{{Code: tea.KeyEscape}}},
+		{"ctrl+c while naming", []tea.KeyPressMsg{keyText("n"), keyText("b")},
+			[]tea.KeyPressMsg{{Code: 'c', Mod: tea.ModCtrl}}},
+		{"esc in the N prompt", []tea.KeyPressMsg{keyText("N"), keyText("b"), {Code: tea.KeyEnter}},
+			[]tea.KeyPressMsg{{Code: tea.KeyEscape}}},
+		{"ctrl+c in the N prompt", []tea.KeyPressMsg{keyText("N"), keyText("b"), {Code: tea.KeyEnter}},
+			[]tea.KeyPressMsg{{Code: 'c', Mod: tea.ModCtrl}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			storageState := &fakeInstanceStorage{instances: json.RawMessage("[]")}
+			storage, err := session.NewStorage(storageState)
+			require.NoError(t, err)
+			h := newDevStackHome(t, dev.New(nil), &fakeAppState{helpSeen: ^uint32(0)})
+			h.storage = storage
+
+			// A, as its start leaves it: started, in the list, not the row being named.
+			started, err := session.FromInstanceData(session.InstanceData{
+				Title: "started-while-naming", Path: t.TempDir(), Status: session.Paused,
+				NoWorktree: true, Program: "claude"})
+			require.NoError(t, err)
+			h.list.AddInstance(started)()
+
+			press := func(msg tea.KeyPressMsg) { h.keySent = true; h.handleKeyPress(msg) }
+			for _, k := range tc.open {
+				press(k)
+			}
+			pending := h.list.GetSelectedInstance()
+			require.NotSame(t, started, pending)
+			require.False(t, pending.Started())
+
+			_, _ = h.Update(instanceStartedMsg{instance: started})
+			assert.Same(t, pending, h.list.GetSelectedInstance(),
+				"the start moved the cursor off the session being named")
+
+			for _, k := range tc.abandon {
+				press(k)
+			}
+			require.Equal(t, []*session.Instance{started}, h.list.GetInstances(),
+				"abandoning the new session must leave the started one, and only it")
+		})
+	}
+}
+
+// Quitting while a session is being started, resumed, checked out or killed cut
+// that work off halfway: a start left a tmux session and a worktree no row owns,
+// a checkout was saved as still running. The first q now says so and only a
+// second one quits.
+func TestQuitWaitsForASecondPressWhileWorkIsInFlight(t *testing.T) {
+	storage, err := session.NewStorage(&fakeInstanceStorage{instances: json.RawMessage("[]")})
+	require.NoError(t, err)
+	h := newDevStackHome(t, dev.New(nil), &fakeAppState{})
+	h.storage = storage
+	// A notice's Cmd is its hide timer, so it is not waited out.
+	quits := func(cmd tea.Cmd) bool {
+		if cmd == nil {
+			return false
+		}
+		got := make(chan tea.Msg, 1)
+		go func() { got <- cmd() }()
+		select {
+		case msg := <-got:
+			_, ok := msg.(tea.QuitMsg)
+			return ok
+		case <-time.After(200 * time.Millisecond):
+			return false
+		}
+	}
+	press := func(k string) tea.Cmd { h.keySent = true; _, cmd := h.handleKeyPress(keyText(k)); return cmd }
+
+	resuming, err := session.NewInstance(session.InstanceOptions{Title: "resuming", Path: ".", Program: "claude"})
+	require.NoError(t, err)
+	h.busy = map[*session.Instance]bool{resuming: true}
+
+	require.False(t, quits(press("q")), "the first q must not quit with a resume in flight")
+	require.Contains(t, h.errBox.String(), "press q again")
+	require.True(t, quits(press("q")), "the second q quits anyway")
+
+	h.quitArmed = false
+	require.False(t, quits(press("q")))
+	press("j")
+	require.False(t, quits(press("q")), "another key in between disarms the second press")
+
+	h.busy = nil
+	h.quitArmed = false
+	require.True(t, quits(press("q")), "with nothing in flight q quits at once")
+}
+
+// The busy spinner sits in a fixed-width column of the list row. A frame two
+// cells wide would shift everything after it on every other frame.
+func TestBusySpinnerFramesAreOneCellWide(t *testing.T) {
+	for _, f := range busySpinner.Frames {
+		require.Equal(t, 1, lipgloss.Width(f), "frame %q", f)
+	}
 }

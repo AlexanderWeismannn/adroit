@@ -45,10 +45,14 @@ type TerminalPane struct {
 	mu            sync.Mutex
 	width, height int
 	sessions      map[string]*terminalSession // instanceTitle → session
-	currentTitle  string                      // currently displayed instance
-	content       string
-	fallback      bool
-	fallbackText  string
+	// opening holds the shells being started off the loop, by instance title.
+	// The token is how a start learns it was cancelled meanwhile -- a close for
+	// that instance drops it -- so it closes what it made rather than storing it.
+	opening      map[string]*struct{}
+	currentTitle string // currently displayed instance
+	content      string
+	fallback     bool
+	fallbackText string
 
 	isScrolling bool
 	viewport    viewport.Model
@@ -57,6 +61,7 @@ type TerminalPane struct {
 func NewTerminalPane() *TerminalPane {
 	return &TerminalPane{
 		sessions: make(map[string]*terminalSession),
+		opening:  make(map[string]*struct{}),
 		viewport: viewport.New(),
 	}
 }
@@ -84,16 +89,22 @@ func (t *TerminalPane) setFallbackState(message string) {
 	t.content = ""
 }
 
-// UpdateContent captures the tmux pane output for the terminal session.
+// UpdateContent points the pane at instance and shows what its shell holds.
+//
+// It runs on the update loop, on every move of the cursor, so it does as little
+// tmux as it can: one capture of a shell that is already open. Opening one --
+// a has-session, a new-session, and a wait of up to two seconds for it to come
+// up -- happens off the loop (see open), and the pane tick's Sample picks the
+// shell up once it is there.
 func (t *TerminalPane) UpdateContent(instance *session.Instance) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	if instance == nil {
-		t.setFallbackState("Select an instance to open a terminal")
+		t.setFallbackState("Select a session to open a terminal")
 		return nil
 	}
-	if instance.Status == session.Paused {
+	if instance.GetStatus() == session.Paused {
 		t.setFallbackState("Session is paused. Resume to use terminal.")
 		return nil
 	}
@@ -107,20 +118,31 @@ func (t *TerminalPane) UpdateContent(instance *session.Instance) error {
 		return nil
 	}
 
-	// Ensure we have a terminal session for this instance
-	if err := t.ensureSessionLocked(instance); err != nil {
-		return err
-	}
-
-	s, ok := t.sessions[t.currentTitle]
-	if !ok || s.tmuxSession == nil || !s.tmuxSession.DoesSessionExist() {
+	if instance.GetWorktreePath() == "" {
 		t.setFallbackState("Terminal session not available.")
+		return nil
+	}
+	t.currentTitle = instance.Title
+
+	s, ok := t.sessions[instance.Title]
+	if !ok || s.tmuxSession == nil {
+		t.openLocked(instance)
 		return nil
 	}
 
 	content, err := s.tmuxSession.CapturePaneContent()
 	if err != nil {
-		return fmt.Errorf("terminal pane: failed to capture content: %w", err)
+		// The shell's session has gone (it was exited, or tmux was). Dropping the
+		// entry is not enough: its tmux client went with it, and the PTY we were
+		// holding is what has to be closed for the process to be waited for
+		// rather than left defunct. Not Close -- there is no session left to kill.
+		log.InfoLog.Printf("terminal pane: %s's shell is gone, opening another: %v", instance.Title, err)
+		if err := s.tmuxSession.CloseClient(); err != nil {
+			log.InfoLog.Printf("terminal pane: %v", err)
+		}
+		delete(t.sessions, instance.Title)
+		t.openLocked(instance)
+		return nil
 	}
 
 	t.fallback = false
@@ -166,50 +188,58 @@ func (t *TerminalPane) ApplySample(instance *session.Instance, content string) {
 	t.content = content
 }
 
-// ensureSession creates or reuses a cached terminal tmux session for the given instance.
-func (t *TerminalPane) ensureSession(instance *session.Instance) error {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.ensureSessionLocked(instance)
-}
-
-// ensureSessionLocked is the lock-free implementation of ensureSession.
-// Caller must hold t.mu.
-func (t *TerminalPane) ensureSessionLocked(instance *session.Instance) error {
-	if instance == nil || !instance.Started() || instance.Status == session.Paused {
-		return nil
+// openLocked starts a shell for instance off the loop, unless one is already on
+// its way. The pane says so meanwhile. Caller must hold t.mu.
+func (t *TerminalPane) openLocked(instance *session.Instance) {
+	title, worktreePath := instance.Title, instance.GetWorktreePath()
+	t.setFallbackState("Opening a terminal…")
+	if t.opening[title] != nil {
+		return
 	}
+	token := &struct{}{}
+	t.opening[title] = token
+	width, height := t.width, t.height
 
-	worktreePath := instance.GetWorktreePath()
-	if worktreePath == "" {
-		return nil
-	}
+	go func() {
+		ts, err := openShell(title, worktreePath, width, height)
 
-	t.currentTitle = instance.Title
-
-	// Check if we already have a cached session for this instance
-	if s, ok := t.sessions[instance.Title]; ok {
-		if s.tmuxSession != nil && s.tmuxSession.DoesSessionExist() {
-			return nil
+		t.mu.Lock()
+		defer t.mu.Unlock()
+		if t.opening[title] != token {
+			// Closed while it was opening: the instance was killed or checked out.
+			if ts != nil {
+				go closeShell(title, ts)
+			}
+			return
 		}
-		// The session died. Dropping the entry is not enough: its tmux client
-		// went with it, and the PTY we were holding is what has to be closed for
-		// the process to be waited for rather than left defunct. Not Close --
-		// there is no session left to kill.
-		if s.tmuxSession != nil {
-			if err := s.tmuxSession.CloseClient(); err != nil {
-				log.InfoLog.Printf("terminal pane: %v", err)
+		delete(t.opening, title)
+		if err != nil {
+			log.ErrorLog.Printf("%v", err)
+			if t.currentTitle == title {
+				t.setFallbackState(err.Error())
+			}
+			return
+		}
+		t.sessions[title] = &terminalSession{tmuxSession: ts, worktreePath: worktreePath}
+		// Sized to the pane as it is now, not as it was when the start began.
+		if (t.width != width || t.height != height) && t.width > 0 && t.height > 0 {
+			if err := ts.SetDetachedSize(t.width, t.height); err != nil {
+				log.InfoLog.Printf("terminal pane: failed to set size: %v", err)
 			}
 		}
-		delete(t.sessions, instance.Title)
-	}
+	}()
+}
 
+// openShell starts, or takes back from a previous run, the shell session for an
+// instance. It shells out to tmux and waits for the session to come up, so it
+// is never called with t.mu held.
+func openShell(title, worktreePath string, width, height int) (*tmux.TmuxSession, error) {
 	shell := os.Getenv("SHELL")
 	if shell == "" {
 		shell = "/bin/sh"
 	}
 
-	ts := tmux.NewTmuxSession(TerminalSessionName(instance.Title), shell)
+	ts := tmux.NewTmuxSession(TerminalSessionName(title), shell)
 
 	// Check if session already exists (e.g. from a previous run)
 	if ts.DoesSessionExist() {
@@ -217,30 +247,31 @@ func (t *TerminalPane) ensureSessionLocked(instance *session.Instance) error {
 			// Session exists but can't restore, kill it and start fresh.
 			// Close releases the client as well as killing the session.
 			_ = ts.Close()
-			ts = tmux.NewTmuxSession(TerminalSessionName(instance.Title), shell)
+			ts = tmux.NewTmuxSession(TerminalSessionName(title), shell)
 			if err := ts.Start(worktreePath); err != nil {
-				return fmt.Errorf("terminal pane: failed to start session: %w", err)
+				return nil, fmt.Errorf("terminal pane: failed to start session: %w", err)
 			}
 		}
 	} else {
 		if err := ts.Start(worktreePath); err != nil {
-			return fmt.Errorf("terminal pane: failed to start session: %w", err)
+			return nil, fmt.Errorf("terminal pane: failed to start session: %w", err)
 		}
 	}
 
-	t.sessions[instance.Title] = &terminalSession{
-		tmuxSession:  ts,
-		worktreePath: worktreePath,
-	}
-
-	// Set the size
-	if t.width > 0 && t.height > 0 {
-		if err := ts.SetDetachedSize(t.width, t.height); err != nil {
+	if width > 0 && height > 0 {
+		if err := ts.SetDetachedSize(width, height); err != nil {
 			log.InfoLog.Printf("terminal pane: failed to set size: %v", err)
 		}
 	}
+	return ts, nil
+}
 
-	return nil
+// closeShell kills a shell session. Never called with t.mu held: it waits on
+// tmux kill-session.
+func closeShell(title string, ts *tmux.TmuxSession) {
+	if err := ts.Close(); err != nil {
+		log.InfoLog.Printf("terminal pane: failed to close session for %s: %v", title, err)
+	}
 }
 
 // Attach attaches to the terminal tmux session (full-screen).
@@ -278,15 +309,18 @@ func (t *TerminalPane) Close() {
 	t.fallbackText = ""
 }
 
-// CloseForInstance kills the cached terminal session for a specific instance.
+// CloseForInstance drops the terminal session for a specific instance and kills
+// it off the loop -- the caller is the update loop, and kill-session can wait on
+// a busy tmux server. A shell still being opened for it is closed as soon as it
+// is up. Should the process exit before the kill runs, the startup reaper finds
+// the session by its name and removes it then.
 func (t *TerminalPane) CloseForInstance(title string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	delete(t.opening, title)
 	if s, ok := t.sessions[title]; ok {
 		if s.tmuxSession != nil {
-			if err := s.tmuxSession.Close(); err != nil {
-				log.InfoLog.Printf("terminal pane: failed to close session for %s: %v", title, err)
-			}
+			go closeShell(title, s.tmuxSession)
 		}
 		delete(t.sessions, title)
 	}

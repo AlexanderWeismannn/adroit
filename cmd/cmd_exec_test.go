@@ -1,10 +1,12 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 )
 
 // A failure has to say what failed and why, and still expose the exit code to a
@@ -28,5 +30,28 @@ func TestExecErrorCarriesStderrAndExitCode(t *testing.T) {
 	out, err := Exec{}.Output(exec.Command("sh", "-c", "printf ok"))
 	if err != nil || string(out) != "ok" {
 		t.Fatalf("Output() = %q, %v", out, err)
+	}
+}
+
+// A git killed by its timeout can leave ssh or git-remote-https behind holding
+// its output pipe, and Wait used to go on until they let go of it: a one-minute
+// fetch timeout became however long the network took, and the cache entry stayed
+// "fetching" all that while. The helpers bound the wait for the pipe as well.
+func TestATimeoutAlsoBoundsTheWaitForWhatTheCommandLeftBehind(t *testing.T) {
+	for name, wrap := range map[string]func(*exec.Cmd) *exec.Cmd{
+		"NonInteractiveGit": NonInteractiveGit,
+		"Detach":            Detach,
+	} {
+		t.Run(name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+			defer cancel()
+			// The child holds stdout open for 20s after the shell is killed.
+			c := wrap(exec.CommandContext(ctx, "sh", "-c", "sleep 20 & wait"))
+			began := time.Now()
+			_, _ = c.Output()
+			if waited := time.Since(began); waited > WaitDelay+3*time.Second {
+				t.Fatalf("Output waited %s for a command whose context ended after 100ms", waited)
+			}
+		})
 	}
 }
