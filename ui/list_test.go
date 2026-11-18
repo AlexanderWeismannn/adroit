@@ -442,7 +442,7 @@ func TestHeaderKeepsTheNeedYouCountWhenNarrow(t *testing.T) {
 	for _, width := range []int{50, 62, 70, 80, 100} {
 		h := NewHeader()
 		h.SetWidth(width)
-		h.Repo, h.Base, h.Mode, h.Sessions, h.NeedYou = "~/postilize", "NO-TASK-shift-tab-redesign", "compact", 15, 2
+		h.Repo, h.Base, h.Mode, h.Sessions, h.NeedYou = "~/projects/webapp", "feature/a-rather-long-branch-name", "compact", 15, 2
 		line := plain(h.String())
 		require.Contains(t, line, "2 need you", "width %d: %q", width, line)
 		require.LessOrEqual(t, lipgloss.Width(line), width)
