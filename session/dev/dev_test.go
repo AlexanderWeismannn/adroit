@@ -496,7 +496,10 @@ func TestAStartCommandCannotReachTheTerminalOrHangTheStart(t *testing.T) {
 	}
 
 	t.Run("its own session", func(t *testing.T) {
-		cfg := check(`if [ "$(ps -o sid= -p $$ | tr -d ' ')" = "$$" ]; then echo detached; else echo shares-the-terminal; fi; exit 1`)
+		// Setsid makes the shell the leader of a new process group as well as a
+		// new session. The group is what ps can name on both Linux and macOS
+		// (macOS ps has no sid keyword).
+		cfg := check(`if [ "$(ps -o pgid= -p $$ | tr -d ' ')" = "$$" ]; then echo detached; else echo shares-the-terminal; fi; exit 1`)
 		err := New(cfg).ensureServices(cfg, t.TempDir())
 		require.Error(t, err)
 		// In brackets: the error quotes the command too, and both words are in it.
